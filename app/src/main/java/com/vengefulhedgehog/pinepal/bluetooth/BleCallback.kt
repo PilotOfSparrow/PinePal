@@ -16,6 +16,10 @@ class BleCallback : BluetoothGattCallback() {
         replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
+    val readResponse = MutableSharedFlow<Triple<UUID, Boolean, ByteArray>>(
+        replay = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
     val notifications = MutableStateFlow<Map<UUID, ByteArray>>(emptyMap())
 
     val servicesDiscoveryFlow = MutableStateFlow<Boolean>(false)
@@ -33,6 +37,20 @@ class BleCallback : BluetoothGattCallback() {
 
     override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
         servicesDiscoveryFlow.tryEmit(status == BluetoothGatt.GATT_SUCCESS)
+    }
+
+    override fun onCharacteristicRead(
+        gatt: BluetoothGatt,
+        characteristic: BluetoothGattCharacteristic,
+        status: Int
+    ) {
+        readResponse.tryEmit(
+            Triple(
+                characteristic.uuid,
+                status == BluetoothGatt.GATT_SUCCESS,
+                characteristic.value
+            )
+        )
     }
 
     override fun onCharacteristicWrite(
