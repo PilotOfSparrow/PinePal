@@ -247,7 +247,7 @@ class MainActivity : ComponentActivity() {
         modifier = Modifier.padding(top = 8.dp)
       )
       Text(
-        text = "Firmware version $firmwareVersion",
+        text = "Firmware version " + (firmwareVersion ?: "..."),
         color = Color.White,
         modifier = Modifier.padding(top = 8.dp)
       )
@@ -256,7 +256,6 @@ class MainActivity : ComponentActivity() {
         modifier = Modifier
           .fillMaxWidth()
           .padding(top = 20.dp)
-          .padding(horizontal = 16.dp)
       ) {
         Text(text = "Sync time", color = Color.White)
       }
@@ -266,7 +265,6 @@ class MainActivity : ComponentActivity() {
           .fillMaxWidth()
           .align(Alignment.CenterHorizontally)
           .padding(top = 20.dp)
-          .padding(horizontal = 16.dp)
       ) {
         Text(text = "Start Firmware Update", color = Color.White)
       }
