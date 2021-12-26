@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.Button
+import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.Surface
 import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
@@ -199,34 +200,11 @@ class MainActivity : ComponentActivity() {
               ConnectedDevice(connection, firmwareVesionState)
             }
           } else {
-            getSystemService(BluetoothManager::class.java)
-              ?.adapter
-              ?.bluetoothLeScanner
-              ?.startScan(object : ScanCallback() {
-                init {
-                  discoveryInProgress.tryEmit(true)
-                }
+            if (deviceList.isEmpty()) {
+              startBleScan()
+            }
 
-                override fun onScanResult(callbackType: Int, result: ScanResult?) {
-                  result?.device?.let { device ->
-                    // TODO Change to timeout
-                    if ("Infini" in device.name.orEmpty()) {
-                      getSystemService(BluetoothManager::class.java)
-                        ?.adapter
-                        ?.bluetoothLeScanner
-                        ?.stopScan(this)
-
-                      discoveryInProgress.tryEmit(false)
-
-                      devices.tryEmit(
-                        devices.value + device
-                      )
-                    }
-                  }
-                }
-              })
-
-            BleDevices(devices = deviceList.toList(), showDiscovery = showDiscoveryProgress)
+            BleDevices(devices = deviceList.toList(), discoveryInPorgress = showDiscoveryProgress)
           }
         }
       }
@@ -296,7 +274,7 @@ class MainActivity : ComponentActivity() {
   }
 
   @Composable
-  private fun BleDevices(devices: List<BluetoothDevice>, showDiscovery: Boolean) {
+  private fun BleDevices(devices: List<BluetoothDevice>, discoveryInPorgress: Boolean) {
     Column(modifier = Modifier.fillMaxSize()) {
       ConstraintLayout(
         modifier = Modifier
@@ -320,14 +298,25 @@ class MainActivity : ComponentActivity() {
               horizontalBias = 0F,
             )
           })
-        Image(
-          painter = painterResource(id = android.R.drawable.ic_menu_upload),
-          contentDescription = "",
-          modifier = Modifier.constrainAs(buttonRefresh) {
-            top.linkTo(parent.top)
-            end.linkTo(parent.end, margin = 16.dp)
-            bottom.linkTo(parent.bottom)
-          })
+        if (discoveryInPorgress) {
+          CircularProgressIndicator(
+            modifier = Modifier.constrainAs(buttonRefresh) {
+              top.linkTo(parent.top)
+              end.linkTo(parent.end, margin = 16.dp)
+              bottom.linkTo(parent.bottom)
+            })
+        } else {
+          Image(
+            painter = painterResource(id = android.R.drawable.stat_notify_sync),
+            contentDescription = "",
+            modifier = Modifier
+              .clickable { startBleScan() }
+              .constrainAs(buttonRefresh) {
+              top.linkTo(parent.top)
+              end.linkTo(parent.end, margin = 16.dp)
+              bottom.linkTo(parent.bottom)
+            })
+        }
       }
       LazyColumn(
         modifier = Modifier
@@ -352,6 +341,37 @@ class MainActivity : ComponentActivity() {
         }
       }
     }
+  }
+
+  private fun startBleScan() {
+    if (discoveryInProgress.value) return
+
+    getSystemService(BluetoothManager::class.java)
+      ?.adapter
+      ?.bluetoothLeScanner
+      ?.startScan(object : ScanCallback() {
+        init {
+          discoveryInProgress.tryEmit(true)
+        }
+
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+          result?.device?.let { device ->
+            // TODO Change to timeout
+            if ("Infini" in device.name.orEmpty()) {
+              getSystemService(BluetoothManager::class.java)
+                ?.adapter
+                ?.bluetoothLeScanner
+                ?.stopScan(this)
+
+              discoveryInProgress.tryEmit(false)
+
+              devices.tryEmit(
+                devices.value + device
+              )
+            }
+          }
+        }
+      })
   }
 
   private fun connectDevice(device: BluetoothDevice) {
