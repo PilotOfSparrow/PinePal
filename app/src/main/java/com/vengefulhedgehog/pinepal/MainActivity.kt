@@ -310,10 +310,10 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier
               .clickable { startBleScan() }
               .constrainAs(buttonRefresh) {
-              top.linkTo(parent.top)
-              end.linkTo(parent.end, margin = 16.dp)
-              bottom.linkTo(parent.bottom)
-            })
+                top.linkTo(parent.top)
+                end.linkTo(parent.end, margin = 16.dp)
+                bottom.linkTo(parent.bottom)
+              })
         }
       }
       LazyColumn(
@@ -386,6 +386,7 @@ class MainActivity : ComponentActivity() {
         )
 
         val time = LocalDateTime.now()
+        val microseconds = ChronoUnit.MICROS.between(Instant.EPOCH, Instant.now()) / 1e6 * 256
         val timeArray = ByteBuffer
           .allocate(10)
           .order(ByteOrder.LITTLE_ENDIAN)
@@ -397,7 +398,7 @@ class MainActivity : ComponentActivity() {
           .put(time.minute.toByte())
           .put(time.second.toByte())
           .put(time.dayOfWeek.value.toByte())
-          .put((ChronoUnit.MICROS.between(Instant.EPOCH, Instant.now()) / 1e6*256).toInt().toByte()) // microseconds
+          .put(microseconds.toInt().toByte())
           .put(0x0001)
           .array()
 
@@ -515,5 +516,23 @@ class MainActivity : ComponentActivity() {
 //                "MEMEME".encodeToByteArray()
 //    },
 //    )
+
+  // For real media control you need
+  // a Notification Service
+  // and then something like this
+//    val m = getSystemService(MediaSessionManager::class.java)!!
+//    val component = ComponentName(this, NotiService::class.java)
+//    val sessions = m.getActiveSessions(component)
+//
+//    sessions.forEach {
+//      Log.d("Sessions", "$it -- " + (it?.metadata?.keySet()?.joinToString()))
+//      Log.d("Sessions", "$it -- " + (it?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)))
+//    }
+//
+//    getSystemService(AudioManager::class.java)
+//      ?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+//
+//    getSystemService(AudioManager::class.java)
+//      ?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
 
 }
