@@ -5,12 +5,6 @@ import android.content.Context
 import kotlinx.coroutines.flow.*
 import java.util.*
 
-fun BluetoothDevice.connect(
-  context: Context,
-): BluetoothConnection {
-  return BluetoothConnection(context, this)
-}
-
 class BluetoothConnection(
   context: Context,
   val device: BluetoothDevice,
@@ -117,9 +111,5 @@ class BluetoothConnection(
         bleCallback.notifications.tryEmit(bleCallback.notifications.value - this.uuid)
       }
       .firstOrNull() == true
-  }
-
-  companion object {
-    private const val TAG = "BLE_CONNECTION"
   }
 }
