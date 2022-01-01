@@ -1,13 +1,15 @@
 package com.vengefulhedgehog.pinepal
 
 import android.Manifest
-import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.AssetManager
 import android.location.LocationManager
@@ -47,7 +49,7 @@ import com.vengefulhedgehog.pinepal.ui.theme.BackgroundDark
 import com.vengefulhedgehog.pinepal.ui.theme.PinePalTheme
 import com.vengefulhedgehog.pinepal.ui.theme.Purple500
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -74,161 +76,192 @@ class MainActivity : ComponentActivity() {
       }
   }
 
-  private val devices = MutableStateFlow(emptySet<BluetoothDevice>())
-  private val connectedDevice = MutableStateFlow<BluetoothConnection?>(null)
-  private val permissionsGranted = MutableStateFlow(false)
-  private val bluetoothEnabled = MutableStateFlow(false)
+  private val state = MutableStateFlow<ViewState>(ViewState.Loading)
+
+  private val foundDevices = MutableStateFlow(emptySet<BluetoothDevice>())
+  private val discoveryProgress = MutableStateFlow(false)
+
   private val locationEnabled = MutableStateFlow(false)
-  private val discoveryInProgress = MutableStateFlow(false)
+  private val bluetoothEnabled = MutableStateFlow(false)
+  private val permissionsGranted = MutableStateFlow(false)
+
   private val firmwareVersion = MutableStateFlow<String?>(null)
-  private val deviceTime = MutableStateFlow<String?>(null)
+  private val connectedDevice = MutableStateFlow<BluetoothConnection?>(null)
+
+  private val resultLauncher = registerForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+  ) {
+    checkRequiredPermissions()
+  }
+  private val activityResultLauncher = registerForActivityResult(
+    ActivityResultContracts.StartActivityForResult(),
+  ) {
+    checkRequiredPermissions()
+  }
+
+  private val locationBroadcastReceiver = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent?) {
+      checkRequiredPermissions()
+    }
+  }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
-    val resultLauncher = registerForActivityResult(
-      ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-      val fineLocationGiven = results.getOrDefault(Manifest.permission.ACCESS_FINE_LOCATION, false)
-
-      permissionsGranted.tryEmit(fineLocationGiven)
-    }
-    val memesLauncher = registerForActivityResult(
-      ActivityResultContracts.StartActivityForResult(),
-    ) { results ->
-      bluetoothEnabled.tryEmit(results.resultCode == Activity.RESULT_OK)
-    }
-
     setContent {
       PinePalTheme {
-        // A surface container using the 'background' color from the theme
         Surface(color = Color.Black) {
-          val deviceList by devices.collectAsState()
-          val deviceConnection by connectedDevice.collectAsState()
-          val permissionsGranted by permissionsGranted.collectAsState()
-          val bluetoothEnabled by bluetoothEnabled.collectAsState()
-          val locationEnabled by locationEnabled.collectAsState()
-          val showDiscoveryProgress by discoveryInProgress.collectAsState()
-          val firmwareVesionState by firmwareVersion.collectAsState()
+          val screenState by state.collectAsState()
 
-          if (!permissionsGranted) {
-            Column(
-              verticalArrangement = Arrangement.Center,
-              horizontalAlignment = Alignment.CenterHorizontally,
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-            ) {
-              // TODO Handle "Never ask again" situation
-              Text(
-                text = "Multiple permissions required for device searching",
-                color = Color.White,
-                textAlign = TextAlign.Center,
+          when (screenState) {
+            ViewState.Loading -> {}
+            is ViewState.ConnectedDevice -> {
+              ConnectedDevice(screenState as ViewState.ConnectedDevice)
+            }
+            is ViewState.DevicesDiscovery -> {
+              DevicesDiscovery(screenState as ViewState.DevicesDiscovery)
+            }
+
+            ViewState.PermissionsRequired,
+            ViewState.ServicesRequired.Location,
+            ViewState.ServicesRequired.Bluetooth -> {
+              DiscoverySetup(
+                description = screenState.getDiscoveryDescription(),
+                buttonText = screenState.getDiscoveryButtonText(),
+                buttonAction = screenState.getDiscoveryButtonAction(),
               )
-              Button(
-                modifier = Modifier.padding(top = 8.dp),
-                onClick = {
-                  resultLauncher.launch(
-                    arrayOf(
-                      Manifest.permission.ACCESS_FINE_LOCATION,
-                      Manifest.permission.BLUETOOTH_SCAN,
-                      Manifest.permission.BLUETOOTH_CONNECT
-                    )
-                  )
-                }) {
-                Text(text = "Grant", color = Color.White)
-              }
             }
-          } else if (!bluetoothEnabled) {
-            Column(
-              verticalArrangement = Arrangement.Center,
-              horizontalAlignment = Alignment.CenterHorizontally,
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-            ) {
-              // TODO Handle "Never ask again" situation
-              Text(
-                text = "Bluetooth not enabled",
-                color = Color.White,
-                textAlign = TextAlign.Center,
-              )
-              Button(
-                modifier = Modifier.padding(top = 8.dp),
-                onClick = {
-                  memesLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-                }) {
-                Text(text = "Enable", color = Color.White)
-              }
-            }
-          } else if (!locationEnabled) {
-            Column(
-              verticalArrangement = Arrangement.Center,
-              horizontalAlignment = Alignment.CenterHorizontally,
-              modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-            ) {
-              // TODO Handle "Never ask again" situation
-              Text(
-                text = "Location not enabled",
-                color = Color.White,
-                textAlign = TextAlign.Center,
-              )
-              Button(
-                modifier = Modifier.padding(top = 8.dp),
-                onClick = {
-                  memesLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
-                }) {
-                Text(text = "Enable", color = Color.White)
-              }
-            }
-          } else if (deviceConnection != null) {
-            deviceConnection?.let { connection ->
-              lifecycleScope.launch(Dispatchers.Default) {
-                val firmwareVersionString = connection.run {
-                  val firmwareVersionChar = findCharacteristic(
-                    UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
-                  )
-
-                  firmwareVersionChar?.read()?.decodeToString()
-                }
-
-                firmwareVersion.emit(firmwareVersionString)
-              }
-
-              ConnectedDevice(connection, firmwareVesionState)
-            }
-          } else {
-            if (deviceList.isEmpty()) {
-              startBleScan()
-            }
-
-            BleDevices(devices = deviceList.toList(), discoveryInPorgress = showDiscoveryProgress)
           }
         }
       }
     }
   }
 
+  override fun onStart() {
+    super.onStart()
+
+    registerReceiver(
+      locationBroadcastReceiver,
+      IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
+    )
+
+    observeStateChanges()
+  }
+
   override fun onResume() {
     super.onResume()
 
-    locationEnabled.tryEmit(
-      LocationManagerCompat.isLocationEnabled(getSystemService(LocationManager::class.java))
-    )
-    bluetoothEnabled.tryEmit(
-      getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
-    )
-    permissionsGranted.tryEmit(
-      checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-    )
+    checkRequiredPermissions()
+  }
+
+  override fun onStop() {
+    unregisterReceiver(locationBroadcastReceiver)
+
+    super.onStop()
+  }
+
+  private fun observeStateChanges() {
+    val requiredPermissionsAndServices = combine(
+      locationEnabled,
+      bluetoothEnabled,
+      permissionsGranted,
+    ) { locationEnabled, bluetoothEnabled, permissionsGranted ->
+      when {
+        !permissionsGranted -> ViewState.PermissionsRequired
+        !locationEnabled -> ViewState.ServicesRequired.Location
+        !bluetoothEnabled -> ViewState.ServicesRequired.Bluetooth
+        else -> null
+      }
+    }.flowOn(Dispatchers.Default)
+
+    val discovery = combine(
+      foundDevices,
+      discoveryProgress,
+      requiredPermissionsAndServices,
+    ) { devices, discoveryInProgress, permissionsAndServices ->
+      if (permissionsAndServices == null) {
+        ViewState.DevicesDiscovery(
+          devices = devices.toList(),
+          discoveryInProgress = discoveryInProgress,
+        )
+      } else {
+        null
+      }
+    }.flowOn(Dispatchers.Default)
+
+    val connectedDeviceInfo = combine(
+      connectedDevice,
+      firmwareVersion,
+    ) { connectedDevice, firmwareVersion ->
+      connectedDevice?.let {
+        ViewState.ConnectedDevice(
+          name = connectedDevice.device.name.orEmpty(),
+          address = connectedDevice.device.address.orEmpty(),
+          firmwareVersion = firmwareVersion ?: "<fetching>",
+        )
+      }
+    }.flowOn(Dispatchers.Default)
+
+    combine(
+      foundDevices,
+      discoveryProgress,
+      requiredPermissionsAndServices,
+    ) { devices, discoveryInProgress, requiredPermissionsAndServices ->
+      requiredPermissionsAndServices == null && devices.isEmpty() && !discoveryInProgress
+    }
+      .flowOn(Dispatchers.Default)
+      .onEach { shouldStartDiscovery ->
+        if (shouldStartDiscovery) {
+          startBleScan()
+        }
+      }
+      .launchIn(lifecycleScope)
+
+    combine(
+      discovery,
+      connectedDeviceInfo,
+      requiredPermissionsAndServices,
+    ) { discovery, connectedDeviceInfo, permissionsAndServices ->
+      connectedDeviceInfo
+        ?: discovery
+        ?: permissionsAndServices
+        ?: ViewState.Loading
+    }
+      .flowOn(Dispatchers.Default)
+      .onEach(state::emit)
+      .launchIn(lifecycleScope)
+  }
+
+  @Composable
+  private fun DiscoverySetup(
+    description: String,
+    buttonText: String,
+    buttonAction: () -> Unit,
+  ) {
+    Column(
+      verticalArrangement = Arrangement.Center,
+      horizontalAlignment = Alignment.CenterHorizontally,
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(horizontal = 16.dp)
+    ) {
+      Text(
+        text = description,
+        color = Color.White,
+        textAlign = TextAlign.Center,
+      )
+      Button(
+        modifier = Modifier.padding(top = 8.dp),
+        onClick = buttonAction
+      ) {
+        Text(text = buttonText, color = Color.White)
+      }
+    }
   }
 
   @Composable
   private fun ConnectedDevice(
-    connection: BluetoothConnection,
-    firmwareVersion: String?,
+    deviceInfo: ViewState.ConnectedDevice,
   ) {
     Column(
       modifier = Modifier
@@ -237,22 +270,22 @@ class MainActivity : ComponentActivity() {
         .fillMaxHeight()
     ) {
       Text(
-        text = connection.device.name,
+        text = deviceInfo.name,
         color = Color.White,
         modifier = Modifier.padding(top = 12.dp)
       )
       Text(
-        text = connection.device.address,
+        text = deviceInfo.address,
         color = Color.White,
         modifier = Modifier.padding(top = 8.dp)
       )
       Text(
-        text = "Firmware version " + (firmwareVersion ?: "..."),
+        text = "Firmware version ${deviceInfo.firmwareVersion}",
         color = Color.White,
         modifier = Modifier.padding(top = 8.dp)
       )
       Button(
-        onClick = { setCurrentTime(connection = connection) },
+        onClick = { requestAction(BleAction.SYNC_TIME) },
         modifier = Modifier
           .fillMaxWidth()
           .padding(top = 20.dp)
@@ -260,7 +293,7 @@ class MainActivity : ComponentActivity() {
         Text(text = "Sync time", color = Color.White)
       }
       Button(
-        onClick = { startDfu(connection) },
+        onClick = { requestAction(BleAction.START_DFU) },
         modifier = Modifier
           .fillMaxWidth()
           .align(Alignment.CenterHorizontally)
@@ -271,8 +304,15 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  private fun requestAction(action: BleAction) {
+    when (action) {
+      BleAction.SYNC_TIME -> syncTime(connectedDevice.value!!)
+      BleAction.START_DFU -> startDfu(connectedDevice.value!!)
+    }
+  }
+
   @Composable
-  private fun BleDevices(devices: List<BluetoothDevice>, discoveryInPorgress: Boolean) {
+  private fun DevicesDiscovery(discoveryInfo: ViewState.DevicesDiscovery) {
     Column(modifier = Modifier.fillMaxSize()) {
       ConstraintLayout(
         modifier = Modifier
@@ -296,7 +336,7 @@ class MainActivity : ComponentActivity() {
               horizontalBias = 0F,
             )
           })
-        if (discoveryInPorgress) {
+        if (discoveryInfo.discoveryInProgress) {
           CircularProgressIndicator(
             modifier = Modifier.constrainAs(buttonRefresh) {
               top.linkTo(parent.top)
@@ -313,7 +353,8 @@ class MainActivity : ComponentActivity() {
                 top.linkTo(parent.top)
                 end.linkTo(parent.end, margin = 16.dp)
                 bottom.linkTo(parent.bottom)
-              })
+              }
+          )
         }
       }
       LazyColumn(
@@ -321,7 +362,7 @@ class MainActivity : ComponentActivity() {
           .fillMaxSize()
           .background(BackgroundDark)
       ) {
-        items(devices, key = { it.name }) { device ->
+        items(discoveryInfo.devices, key = { it.address }) { device ->
           Column(
             modifier = Modifier
               .fillMaxWidth()
@@ -342,14 +383,14 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun startBleScan() {
-    if (discoveryInProgress.value) return
+    if (discoveryProgress.value) return
 
     getSystemService(BluetoothManager::class.java)
       ?.adapter
       ?.bluetoothLeScanner
       ?.startScan(object : ScanCallback() {
         init {
-          discoveryInProgress.tryEmit(true)
+          discoveryProgress.tryEmit(true)
         }
 
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
@@ -361,15 +402,27 @@ class MainActivity : ComponentActivity() {
                 ?.bluetoothLeScanner
                 ?.stopScan(this)
 
-              discoveryInProgress.tryEmit(false)
+              discoveryProgress.tryEmit(false)
 
-              devices.tryEmit(
-                devices.value + device
+              foundDevices.tryEmit(
+                foundDevices.value + device
               )
             }
           }
         }
       })
+  }
+
+  private fun checkRequiredPermissions() {
+    locationEnabled.tryEmit(
+      LocationManagerCompat.isLocationEnabled(getSystemService(LocationManager::class.java))
+    )
+    bluetoothEnabled.tryEmit(
+      getSystemService(BluetoothManager::class.java)?.adapter?.isEnabled == true
+    )
+    permissionsGranted.tryEmit(
+      checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    )
   }
 
   private fun connectDevice(device: BluetoothDevice) {
@@ -378,7 +431,7 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private fun setCurrentTime(connection: BluetoothConnection) {
+  private fun syncTime(connection: BluetoothConnection) {
     lifecycleScope.launch(Dispatchers.Default) {
       connection.apply {
         val timeChar = findCharacteristic(
@@ -404,6 +457,20 @@ class MainActivity : ComponentActivity() {
 
         timeChar?.write(timeArray)
       }
+    }
+  }
+
+  private fun fetchFirmwareVersion(connection: BluetoothConnection) {
+    lifecycleScope.launch(Dispatchers.Default) {
+      val firmwareVersionString = connection.run {
+        val firmwareVersionChar = findCharacteristic(
+          UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
+        )
+
+        firmwareVersionChar?.read()?.decodeToString()
+      }
+
+      firmwareVersion.emit(firmwareVersionString)
     }
   }
 
@@ -500,6 +567,78 @@ class MainActivity : ComponentActivity() {
         controlPointCharacteristic.write(byteArrayOf(0x05))
       }
     }
+  }
+
+  private fun ViewState.getDiscoveryDescription(): String = when (this) {
+    ViewState.PermissionsRequired -> "Multiple permissions required for device searching"
+    ViewState.ServicesRequired.Location -> "Location not enabled"
+    ViewState.ServicesRequired.Bluetooth -> "Bluetooth not enabled"
+    else -> throw IllegalStateException("No discovery description available for $this")
+  }
+
+  private fun ViewState.getDiscoveryButtonText(): String = when (this) {
+    ViewState.PermissionsRequired -> "Grant"
+
+    ViewState.ServicesRequired.Location,
+    ViewState.ServicesRequired.Bluetooth -> "Enable"
+
+    else -> throw IllegalStateException("No discovery button text available for $this")
+  }
+
+  private fun ViewState.getDiscoveryButtonAction(): () -> Unit = when (this) {
+    ViewState.PermissionsRequired -> {
+      {
+        // TODO Handle "Never ask again" situation
+        resultLauncher.launch(
+          arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.BLUETOOTH_SCAN,
+            Manifest.permission.BLUETOOTH_CONNECT
+          )
+        )
+      }
+    }
+    ViewState.ServicesRequired.Location -> {
+      {
+        activityResultLauncher.launch(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+      }
+    }
+    ViewState.ServicesRequired.Bluetooth -> {
+      {
+        activityResultLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
+      }
+    }
+
+    else -> throw IllegalStateException("No discovery button action available for $this")
+  }
+
+  enum class BleAction {
+    SYNC_TIME,
+    START_DFU,
+  }
+
+  sealed interface ViewState {
+
+    object Loading : ViewState
+
+    object PermissionsRequired : ViewState
+
+    sealed interface ServicesRequired : ViewState {
+      object Location : ServicesRequired
+
+      object Bluetooth : ServicesRequired
+    }
+
+    data class DevicesDiscovery(
+      val devices: List<BluetoothDevice>,
+      val discoveryInProgress: Boolean,
+    ) : ViewState
+
+    data class ConnectedDevice(
+      val name: String,
+      val address: String,
+      val firmwareVersion: String,
+    ) : ViewState
   }
 
   // To send alert
