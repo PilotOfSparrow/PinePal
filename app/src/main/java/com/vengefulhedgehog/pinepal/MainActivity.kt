@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.constraintlayout.compose.Dimension
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.edit
 import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
@@ -84,6 +86,7 @@ class MainActivity : ComponentActivity() {
   private val locationEnabled = MutableStateFlow(false)
   private val bluetoothEnabled = MutableStateFlow(false)
   private val permissionsGranted = MutableStateFlow(false)
+  private val notificationsAccessGranted = MutableStateFlow(false)
 
   private val firmwareVersion = MutableStateFlow<String?>(null)
   private val connectedDevice = MutableStateFlow<BluetoothConnection?>(null)
@@ -105,6 +108,31 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  private val sharedPrefs by lazy {
+    applicationContext.getSharedPreferences(
+      KEY_SHARED_PREF,
+      MODE_PRIVATE
+    )
+  }
+
+  private val bleScanCallback = object : ScanCallback() {
+    private val connectedDeviceMac by lazy {
+      sharedPrefs.getString(KEY_CONNECTED_DEVICE_MAC, null)
+    }
+
+    override fun onScanResult(callbackType: Int, result: ScanResult?) {
+      result?.device?.let { device ->
+        if (device.address.orEmpty() == connectedDeviceMac) {
+          connectDevice(device)
+        }
+
+        foundDevices.tryEmit(
+          foundDevices.value + device
+        )
+      }
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
@@ -115,6 +143,7 @@ class MainActivity : ComponentActivity() {
 
           when (screenState) {
             ViewState.Loading -> {}
+
             is ViewState.ConnectedDevice -> {
               ConnectedDevice(screenState as ViewState.ConnectedDevice)
             }
@@ -189,18 +218,26 @@ class MainActivity : ComponentActivity() {
       }
     }.flowOn(Dispatchers.Default)
 
-    val connectedDeviceInfo = combine(
-      connectedDevice,
-      firmwareVersion,
-    ) { connectedDevice, firmwareVersion ->
-      connectedDevice?.let {
-        ViewState.ConnectedDevice(
-          name = connectedDevice.device.name.orEmpty(),
-          address = connectedDevice.device.address.orEmpty(),
-          firmwareVersion = firmwareVersion ?: "<fetching>",
+    val connectedDeviceInfo = connectedDevice
+      .onEach { connection ->
+        connection?.let { fetchFirmwareVersion(connection) }
+      }
+      .combine(firmwareVersion) { connectedDevice, firmwareVersion ->
+        connectedDevice?.let {
+          ViewState.ConnectedDevice(
+            name = connectedDevice.device.name.orEmpty(),
+            address = connectedDevice.device.address.orEmpty(),
+            firmwareVersion = firmwareVersion ?: "<fetching>",
+
+          )
+        }
+      }
+      .combine(notificationsAccessGranted) { connectedDevice, notificationsAccessGranted ->
+        connectedDevice?.copy(
+          notificationAccessGranted = notificationsAccessGranted,
         )
       }
-    }.flowOn(Dispatchers.Default)
+      .flowOn(Dispatchers.Default)
 
     combine(
       foundDevices,
@@ -212,7 +249,7 @@ class MainActivity : ComponentActivity() {
       .flowOn(Dispatchers.Default)
       .onEach { shouldStartDiscovery ->
         if (shouldStartDiscovery) {
-          startBleScan()
+          bleScanStart()
         }
       }
       .launchIn(lifecycleScope)
@@ -227,6 +264,7 @@ class MainActivity : ComponentActivity() {
         ?: permissionsAndServices
         ?: ViewState.Loading
     }
+      .debounce(300L)
       .flowOn(Dispatchers.Default)
       .onEach(state::emit)
       .launchIn(lifecycleScope)
@@ -247,14 +285,13 @@ class MainActivity : ComponentActivity() {
     ) {
       Text(
         text = description,
-        color = Color.White,
         textAlign = TextAlign.Center,
       )
       Button(
         modifier = Modifier.padding(top = 8.dp),
         onClick = buttonAction
       ) {
-        Text(text = buttonText, color = Color.White)
+        Text(text = buttonText)
       }
     }
   }
@@ -271,26 +308,41 @@ class MainActivity : ComponentActivity() {
     ) {
       Text(
         text = deviceInfo.name,
-        color = Color.White,
         modifier = Modifier.padding(top = 12.dp)
       )
       Text(
         text = deviceInfo.address,
-        color = Color.White,
         modifier = Modifier.padding(top = 8.dp)
       )
       Text(
         text = "Firmware version ${deviceInfo.firmwareVersion}",
-        color = Color.White,
         modifier = Modifier.padding(top = 8.dp)
       )
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Text(text = "Notifications access status")
+
+        if (deviceInfo.notificationAccessGranted) {
+          Text(text = "Granted")
+        } else {
+          Button(
+            modifier = Modifier.padding(12.dp),
+            onClick = { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }) {
+            Text(text = "Grant")
+          }
+        }
+      }
       Button(
         onClick = { requestAction(BleAction.SYNC_TIME) },
         modifier = Modifier
           .fillMaxWidth()
           .padding(top = 20.dp)
       ) {
-        Text(text = "Sync time", color = Color.White)
+        Text(text = "Sync time")
       }
       Button(
         onClick = { requestAction(BleAction.START_DFU) },
@@ -299,7 +351,7 @@ class MainActivity : ComponentActivity() {
           .align(Alignment.CenterHorizontally)
           .padding(top = 20.dp)
       ) {
-        Text(text = "Start Firmware Update", color = Color.White)
+        Text(text = "Start Firmware Update")
       }
     }
   }
@@ -323,7 +375,6 @@ class MainActivity : ComponentActivity() {
 
         Text(
           text = "Discovered devices",
-          color = Color.White,
           modifier = Modifier.constrainAs(title) {
             width = Dimension.preferredWrapContent
 
@@ -348,7 +399,7 @@ class MainActivity : ComponentActivity() {
             painter = painterResource(id = android.R.drawable.stat_notify_sync),
             contentDescription = "",
             modifier = Modifier
-              .clickable { startBleScan() }
+              .clickable { bleScanStart() }
               .constrainAs(buttonRefresh) {
                 top.linkTo(parent.top)
                 end.linkTo(parent.end, margin = 16.dp)
@@ -372,7 +423,6 @@ class MainActivity : ComponentActivity() {
           ) {
             Text(
               text = device.name,
-              color = Color.White,
               modifier = Modifier.fillMaxWidth()
             )
             Text(text = device.address, color = Color.LightGray, fontSize = 12.sp)
@@ -382,35 +432,25 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private fun startBleScan() {
+  private fun bleScanStart() {
     if (discoveryProgress.value) return
 
     getSystemService(BluetoothManager::class.java)
       ?.adapter
       ?.bluetoothLeScanner
-      ?.startScan(object : ScanCallback() {
-        init {
-          discoveryProgress.tryEmit(true)
-        }
+      ?.startScan(bleScanCallback)
+      ?.let { discoveryProgress.tryEmit(true) }
+  }
 
-        override fun onScanResult(callbackType: Int, result: ScanResult?) {
-          result?.device?.let { device ->
-            // TODO Change to timeout
-            if ("Infini" in device.name.orEmpty()) {
-              getSystemService(BluetoothManager::class.java)
-                ?.adapter
-                ?.bluetoothLeScanner
-                ?.stopScan(this)
+  private fun bleScanStop() {
+    if (!discoveryProgress.value) return
 
-              discoveryProgress.tryEmit(false)
+    getSystemService(BluetoothManager::class.java)
+      ?.adapter
+      ?.bluetoothLeScanner
+      ?.stopScan(bleScanCallback)
 
-              foundDevices.tryEmit(
-                foundDevices.value + device
-              )
-            }
-          }
-        }
-      })
+    discoveryProgress.tryEmit(false)
   }
 
   private fun checkRequiredPermissions() {
@@ -423,9 +463,18 @@ class MainActivity : ComponentActivity() {
     permissionsGranted.tryEmit(
       checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     )
+    notificationsAccessGranted.tryEmit(
+      BuildConfig.APPLICATION_ID in notificationsListeners
+    )
   }
 
   private fun connectDevice(device: BluetoothDevice) {
+    sharedPrefs.edit {
+      putString(KEY_CONNECTED_DEVICE_MAC, device.address)
+    }
+
+    bleScanStop()
+
     lifecycleScope.launch {
       connectedDevice.emit(device.connect(applicationContext))
     }
@@ -638,8 +687,12 @@ class MainActivity : ComponentActivity() {
       val name: String,
       val address: String,
       val firmwareVersion: String,
+      val notificationAccessGranted: Boolean = false,
     ) : ViewState
   }
+
+  private val Context.notificationsListeners: Set<String>
+    get() = NotificationManagerCompat.getEnabledListenerPackages(this.applicationContext)
 
   // To send alert
 //    gatt.writeCharacteristic(
@@ -673,5 +726,10 @@ class MainActivity : ComponentActivity() {
 //
 //    getSystemService(AudioManager::class.java)
 //      ?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+
+  companion object {
+    private const val KEY_SHARED_PREF = "pine_pal_shared_prefs"
+    private const val KEY_CONNECTED_DEVICE_MAC = "connected_device_mac"
+  }
 
 }
