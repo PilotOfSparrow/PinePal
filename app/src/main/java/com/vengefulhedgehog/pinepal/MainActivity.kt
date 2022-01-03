@@ -229,7 +229,7 @@ class MainActivity : ComponentActivity() {
             address = connectedDevice.device.address.orEmpty(),
             firmwareVersion = firmwareVersion ?: "<fetching>",
 
-          )
+            )
         }
       }
       .combine(notificationsAccessGranted) { connectedDevice, notificationsAccessGranted ->
@@ -251,6 +251,13 @@ class MainActivity : ComponentActivity() {
         if (shouldStartDiscovery) {
           bleScanStart()
         }
+      }
+      .launchIn(lifecycleScope)
+
+    connectedDevice
+      .filterNotNull()
+      .combine((application as App).notification.debounce(2_000L)) { connection, notification ->
+        sendNotification(connection, notification)
       }
       .launchIn(lifecycleScope)
 
@@ -618,6 +625,31 @@ class MainActivity : ComponentActivity() {
     }
   }
 
+  private fun sendNotification(
+    connection: BluetoothConnection,
+    notification: Pair<String, String>
+  ) {
+    lifecycleScope.launch {
+      connection.apply {
+        findCharacteristic(UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb"))
+          ?.let { char ->
+            val (title, body) = notification
+
+            val notificationBody = byteArrayOf(
+              0x00.toByte(), // category
+              0x01.toByte(), // amount of notifications
+              0x00.toByte()
+            ) +
+                title.encodeToByteArray() +
+                0x00.toByte() +
+                body.encodeToByteArray()
+
+            char.write(notificationBody)
+          }
+      }
+    }
+  }
+
   private fun ViewState.getDiscoveryDescription(): String = when (this) {
     ViewState.PermissionsRequired -> "Multiple permissions required for device searching"
     ViewState.ServicesRequired.Location -> "Location not enabled"
@@ -693,21 +725,6 @@ class MainActivity : ComponentActivity() {
 
   private val Context.notificationsListeners: Set<String>
     get() = NotificationManagerCompat.getEnabledListenerPackages(this.applicationContext)
-
-  // To send alert
-//    gatt.writeCharacteristic(
-//    characteristic
-//    .apply {
-//        value =  byteArrayOf(
-//            0x00.toByte(), // category
-//            0x01.toByte(), // amount of notifications
-//            0x00.toByte(), // content separator
-//        ) +
-//                "TESSSST".encodeToByteArray() +
-//                byteArrayOf(0x00.toByte()) +
-//                "MEMEME".encodeToByteArray()
-//    },
-//    )
 
   // For real media control you need
   // a Notification Service
