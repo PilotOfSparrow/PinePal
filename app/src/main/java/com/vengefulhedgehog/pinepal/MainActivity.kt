@@ -638,7 +638,7 @@ class MainActivity : ComponentActivity() {
             val notificationBody = byteArrayOf(
               0x00.toByte(), // category
               0x01.toByte(), // amount of notifications
-              0x00.toByte()
+              0x00.toByte()  // content separator
             ) +
                 title.encodeToByteArray() +
                 0x00.toByte() +
