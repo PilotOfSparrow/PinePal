@@ -89,7 +89,8 @@ class MainActivity : ComponentActivity() {
   private val notificationsAccessGranted = MutableStateFlow(false)
 
   private val firmwareVersion = MutableStateFlow<String?>(null)
-  private val connectedDevice = MutableStateFlow<BluetoothConnection?>(null)
+  private val connectedDevice: StateFlow<BluetoothConnection?>
+    get() = (application as App).connectedDevice.asStateFlow()
 
   private val resultLauncher = registerForActivityResult(
     ActivityResultContracts.RequestMultiplePermissions()
@@ -251,13 +252,6 @@ class MainActivity : ComponentActivity() {
         if (shouldStartDiscovery) {
           bleScanStart()
         }
-      }
-      .launchIn(lifecycleScope)
-
-    connectedDevice
-      .filterNotNull()
-      .combine((application as App).notification.debounce(2_000L)) { connection, notification ->
-        sendNotification(connection, notification)
       }
       .launchIn(lifecycleScope)
 
@@ -483,7 +477,7 @@ class MainActivity : ComponentActivity() {
     bleScanStop()
 
     lifecycleScope.launch {
-      connectedDevice.emit(device.connect(applicationContext))
+      (application as App).onDeviceConnected(device.connect(applicationContext))
     }
   }
 
@@ -575,11 +569,11 @@ class MainActivity : ComponentActivity() {
 
         Log.i("DFU", "Step 5")
 
-        val receiveNotificationInterval = 0x0A
+        val confirmationNotificationsInterval = 0x0A
         controlPointCharacteristic.write(
           byteArrayOf(
             0x08,
-            receiveNotificationInterval.toByte()
+            confirmationNotificationsInterval.toByte()
           )
         )
 
@@ -590,25 +584,23 @@ class MainActivity : ComponentActivity() {
         Log.i("DFU", "Step 7")
 
         val segmentSize = 20
-        val batchSize = segmentSize * receiveNotificationInterval
+        val batchSize = segmentSize * confirmationNotificationsInterval
         for (batchIndex in binFile.indices step batchSize) {
           Log.i("DFU_UPLOAD", "Sending batch $batchIndex")
 
           for (segmentIndex in batchIndex until batchIndex + batchSize step segmentSize) {
-            Log.i(
-              "DFU_UPLOAD",
-              "Sending segment from $segmentIndex to ${segmentIndex + segmentSize}"
-            )
-
-            val sendingResult = packetCharacteristic.write(
+            packetCharacteristic.write(
               binFile.sliceArray(
                 segmentIndex until (segmentIndex + segmentSize).coerceAtMost(binFile.size)
               )
             )
-
-            Log.i("DFU_UPLOAD", "Sending result: $sendingResult")
           }
-          controlPointCharacteristic.awaitNotification(startsWith = 0x11)
+
+          if (batchIndex + batchSize < binFile.lastIndex) {
+            Log.i("DFU_UPLOAD", "Wait approve for $batchIndex")
+
+            controlPointCharacteristic.awaitNotification(startsWith = 0x11)
+          }
         }
 
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x03, 0x01))
@@ -621,31 +613,6 @@ class MainActivity : ComponentActivity() {
         Log.i("DFU", "Step 9")
 
         controlPointCharacteristic.write(byteArrayOf(0x05))
-      }
-    }
-  }
-
-  private fun sendNotification(
-    connection: BluetoothConnection,
-    notification: Pair<String, String>
-  ) {
-    lifecycleScope.launch {
-      connection.apply {
-        findCharacteristic(UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb"))
-          ?.let { char ->
-            val (title, body) = notification
-
-            val notificationBody = byteArrayOf(
-              0x00.toByte(), // category
-              0x01.toByte(), // amount of notifications
-              0x00.toByte()  // content separator
-            ) +
-                title.encodeToByteArray() +
-                0x00.toByte() +
-                body.encodeToByteArray()
-
-            char.write(notificationBody)
-          }
       }
     }
   }

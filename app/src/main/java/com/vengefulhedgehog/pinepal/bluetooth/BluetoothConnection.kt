@@ -2,7 +2,10 @@ package com.vengefulhedgehog.pinepal.bluetooth
 
 import android.bluetooth.*
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.*
 
 class BluetoothConnection(
@@ -17,14 +20,33 @@ class BluetoothConnection(
     bleCallback,
   )
 
+  private val mutex = Mutex()
+
+  override fun equals(other: Any?): Boolean {
+    if (this === other) return true
+    if (other !is BluetoothConnection) return false
+
+    if (device != other.device) return false
+
+    return true
+  }
+
+  override fun hashCode(): Int {
+    return device.hashCode()
+  }
+
+  fun disconnect() {
+    gatt.disconnect()
+  }
+
   suspend fun listServices(): List<BluetoothGattService> {
     if (gatt.services.isEmpty()) {
       bleCallback.connectionState
         .filter { it == BleConnectionState.CONNECTED }
-        .flatMapLatest {
+        .map {
           gatt.discoverServices()
 
-          bleCallback.servicesDiscoveryFlow.filter { it }
+          bleCallback.awaitServiceDiscovered()
         }
         .firstOrNull()
     }
@@ -40,76 +62,80 @@ class BluetoothConnection(
       ?.getCharacteristic(uuid)
   }
 
+  fun BluetoothGattCharacteristic.observeNotifications(): Flow<ByteArray> =
+    bleCallback
+      .observeNotifications(this.uuid)
+
   suspend fun enableNotificationsFor(
     characteristic: BluetoothGattCharacteristic,
     notificationsDescriptorUuid: UUID,
-  ): Boolean {
+  ) {
     val notifDescriptor = characteristic
       .descriptors
-      .find { it.uuid == notificationsDescriptorUuid }
-      ?: return false
+      .first { it.uuid == notificationsDescriptorUuid }
 
-    notifDescriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+    gatt.setCharacteristicNotification(characteristic, true)
 
-    bleCallback.writeResponse.resetReplayCache()
-
-    return gatt.writeDescriptor(notifDescriptor) &&
-        bleCallback.writeResponse
-          .filter { (uuid) -> uuid == notificationsDescriptorUuid }
-          .map { (_, succeed) -> succeed }
-          .firstOrNull() == true
+    notifDescriptor.write(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
   }
 
   suspend fun BluetoothGattCharacteristic.read(): ByteArray? {
-    bleCallback.readResponse.resetReplayCache()
-
-    if (!gatt.readCharacteristic(this)) {
-      return null
+    return mutex.withLock {
+      if (gatt.readCharacteristic(this)) {
+        bleCallback.awaitRead(uuid)
+      } else {
+        null
+      }
     }
+  }
 
-    return bleCallback.readResponse
-      .filter { (uuid) -> uuid == this.uuid }
-      .map { (_, succeed, value) -> value.takeIf { succeed } }
-      .firstOrNull()
+  suspend fun BluetoothGattDescriptor.write(
+    bytes: ByteArray,
+  ) {
+    mutex.withLock {
+      Log.i(TAG, "Writing to descriptor: ${this.uuid}")
+
+      val written = gatt.writeDescriptor(this.apply { value = bytes })
+
+      check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
+    }
   }
 
   suspend fun BluetoothGattCharacteristic.write(
     bytes: ByteArray,
-  ): Boolean {
-    bleCallback.writeResponse.resetReplayCache()
+  ) {
+    mutex.withLock {
+      Log.i(TAG, "Writing to characteristic: ${this.uuid}")
 
-    return gatt.writeCharacteristic(this.apply { value = bytes }) &&
-        bleCallback.writeResponse
-          .filter { (uuid) -> uuid == this.uuid }
-          .map { (_, succeed, value) -> succeed && value.contentEquals(bytes) }
-          .firstOrNull() == true
+      val written = gatt.writeCharacteristic(this.apply { value = bytes })
+
+      check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
+    }
   }
 
   suspend fun BluetoothGattCharacteristic.awaitNotification(
-    content: ByteArray,
+    expectedContent: ByteArray,
   ): Boolean {
-    return bleCallback.notifications
-      .mapNotNull { notifications ->
-        content.contentEquals(notifications[this.uuid])
+    return bleCallback.observeNotifications(this.uuid)
+      .map { notificationContent ->
+        notificationContent.contentEquals(expectedContent)
       }
-      .filterNotNull()
-      .onEach {
-        bleCallback.notifications.tryEmit(bleCallback.notifications.value - this.uuid)
-      }
+      .take(1)
       .firstOrNull() == true
   }
 
   suspend fun BluetoothGattCharacteristic.awaitNotification(
     startsWith: Int,
   ): Boolean {
-    return bleCallback.notifications
-      .mapNotNull { notifications ->
-        notifications[this.uuid]?.firstOrNull() == startsWith.toByte()
+    return bleCallback.observeNotifications(this.uuid)
+      .map { notificationContent ->
+        notificationContent.firstOrNull() == startsWith.toByte()
       }
-      .filterNotNull()
-      .onEach {
-        bleCallback.notifications.tryEmit(bleCallback.notifications.value - this.uuid)
-      }
+      .take(1)
       .firstOrNull() == true
+  }
+
+  companion object {
+    private const val TAG = "BluetoothConnection"
   }
 }

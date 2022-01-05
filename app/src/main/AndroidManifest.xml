@@ -51,6 +51,12 @@
 
         </service>
 
+        <service
+            android:name=".services.PineTimeConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice"
+            android:label="PineTimeConnectionService" />
+
     </application>
 
 </manifest>
