@@ -141,12 +141,21 @@ class PineTimeConnectionService : Service() {
   private fun subscribeToHeartRate(connection: BluetoothConnection) {
     connection.applyInScope {
       findCharacteristic(UUID_HEART_RATE)
-        ?.let { char ->
-          enableNotificationsFor(char, UUID_DESCRIPTOR_NOTIFY)
+        ?.let { hrChar ->
+          enableNotificationsFor(hrChar, UUID_DESCRIPTOR_NOTIFY)
 
-          char.observeNotifications()
+          merge(
+            flowOf(hrChar.read()),
+            hrChar.observeNotifications(),
+          )
         }
-        ?.map { ByteBuffer.wrap(it).short.toInt() }
+        ?.map { hrByteArray ->
+          if (hrByteArray == null || hrByteArray.isEmpty()) {
+            0
+          } else {
+            ByteBuffer.wrap(hrByteArray).short.toInt()
+          }
+        }
         ?.onEach(heartRateFlow::emit)
         ?.launchIn(connectionScope)
     }
@@ -158,9 +167,12 @@ class PineTimeConnectionService : Service() {
         ?.let { motionChar ->
           enableNotificationsFor(motionChar, UUID_DESCRIPTOR_NOTIFY)
 
-          motionChar.observeNotifications()
+          merge(
+            flowOf(motionChar.read()),
+            motionChar.observeNotifications(),
+          )
         }
-        ?.map { it.firstOrNull()?.toInt() ?: 0 }
+        ?.map { it?.firstOrNull()?.toInt() ?: 0 }
         ?.onEach(stepsFlow::emit)
         ?.launchIn(connectionScope)
     }
