@@ -8,6 +8,7 @@ import android.os.IBinder
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 import com.vengefulhedgehog.pinepal.App
+import com.vengefulhedgehog.pinepal.bluetooth.BleConnectionState
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
 import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
 import kotlinx.coroutines.*
@@ -21,6 +22,7 @@ class PineTimeConnectionService : Service() {
 
   private val stepsFlow = MutableStateFlow(0)
   private val heartRateFlow = MutableStateFlow(0)
+  private val connectionStateFlow = MutableStateFlow(BleConnectionState.DISCONNECTED)
 
   private val notificationManager by lazy { NotificationManagerCompat.from(applicationContext) }
   private val notificationBuilder by lazy {
@@ -39,16 +41,7 @@ class PineTimeConnectionService : Service() {
 
     startForeground(ID_NOTIFICATION, notificationBuilder.build())
 
-    (application as App).connectedDevice
-      .filterNotNull()
-      .onEach { connection ->
-        subscribeToSteps(connection)
-        subscribeToHeartRate(connection)
-      }
-      .combine(observeNotifications()) { connection, notification ->
-        sendNotification(connection, notification)
-      }
-      .launchIn(connectionScope)
+    observeConnectedDevice()
 
     upkeepPhoneNotificationContent()
 
@@ -67,15 +60,38 @@ class PineTimeConnectionService : Service() {
     combine(
       stepsFlow,
       heartRateFlow,
-    ) { steps, hr ->
-      "HR: $hr Steps: $steps"
+      connectionStateFlow,
+    ) { steps, hr, connectionState ->
+      val title = if (connectionState == BleConnectionState.CONNECTED) {
+        "Connected"
+      } else {
+        "Disconnected"
+      }
+
+      title to "HR: $hr Steps: $steps"
     }
       .sample(2_000L)
-      .onEach { notificationText ->
+      .onEach { (title, text) ->
         notificationManager.notify(
           ID_NOTIFICATION,
-          notificationBuilder.setContentText(notificationText).build()
+          notificationBuilder
+            .setContentTitle(title)
+            .setContentText(text).build()
         )
+      }
+      .launchIn(connectionScope)
+  }
+
+  private fun observeConnectedDevice() {
+    (application as App).connectedDevice
+      .filterNotNull()
+      .onEach { connection ->
+        subscribeToSteps(connection)
+        subscribeToHeartRate(connection)
+        subscribeToConnectionState(connection)
+      }
+      .combine(observeNotifications()) { connection, notification ->
+        sendNotification(connection, notification)
       }
       .launchIn(connectionScope)
   }
@@ -148,6 +164,12 @@ class PineTimeConnectionService : Service() {
         ?.onEach(stepsFlow::emit)
         ?.launchIn(connectionScope)
     }
+  }
+
+  private fun subscribeToConnectionState(connection: BluetoothConnection) {
+    connection.state
+      .onEach(connectionStateFlow::emit)
+      .launchIn(connectionScope)
   }
 
   private fun BluetoothConnection.applyInScope(

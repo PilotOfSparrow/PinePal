@@ -3,6 +3,10 @@ package com.vengefulhedgehog.pinepal.bluetooth
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -13,6 +17,9 @@ class BluetoothConnection(
   val device: BluetoothDevice,
 ) {
 
+  private val _state = MutableStateFlow(BleConnectionState.DISCONNECTED)
+  val state = _state.asStateFlow()
+
   private val bleCallback = BleCallback()
   private val gatt: BluetoothGatt = device.connectGatt(
     context,
@@ -21,6 +28,14 @@ class BluetoothConnection(
   )
 
   private val mutex = Mutex()
+
+  private val scope = CoroutineScope(Dispatchers.Default + Job())
+
+  init {
+    bleCallback.connectionState
+      .onEach(_state::emit)
+      .launchIn(scope)
+  }
 
   override fun equals(other: Any?): Boolean {
     if (this === other) return true
@@ -37,6 +52,8 @@ class BluetoothConnection(
 
   fun disconnect() {
     gatt.disconnect()
+
+    scope.cancel()
   }
 
   suspend fun listServices(): List<BluetoothGattService> {
