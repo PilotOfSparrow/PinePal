@@ -110,10 +110,7 @@ class MainActivity : ComponentActivity() {
   }
 
   private val sharedPrefs by lazy {
-    applicationContext.getSharedPreferences(
-      KEY_SHARED_PREF,
-      MODE_PRIVATE
-    )
+    applicationContext.getSharedPreferences(KEY_SHARED_PREF, MODE_PRIVATE)
   }
 
   private val bleScanCallback = object : ScanCallback() {

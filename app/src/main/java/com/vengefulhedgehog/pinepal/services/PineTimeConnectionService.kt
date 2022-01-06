@@ -19,6 +19,9 @@ class PineTimeConnectionService : Service() {
 
   private val connectionScope = CoroutineScope(Dispatchers.Default + Job())
 
+  private val stepsFlow = MutableStateFlow(0)
+  private val heartRateFlow = MutableStateFlow(0)
+
   private val notificationManager by lazy { NotificationManagerCompat.from(applicationContext) }
   private val notificationBuilder by lazy {
     Notification.Builder(applicationContext, ID_CONNECTION_CHANNEL)
@@ -34,20 +37,20 @@ class PineTimeConnectionService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     ensureChannelExists()
 
-    startForeground(
-      ID_NOTIFICATION,
-      notificationBuilder.build(),
-    )
+    startForeground(ID_NOTIFICATION, notificationBuilder.build())
 
     (application as App).connectedDevice
       .filterNotNull()
       .onEach { connection ->
+        subscribeToSteps(connection)
         subscribeToHeartRate(connection)
       }
       .combine(observeNotifications()) { connection, notification ->
         sendNotification(connection, notification)
       }
       .launchIn(connectionScope)
+
+    upkeepPhoneNotificationContent()
 
     return super.onStartCommand(intent, flags, startId)
   }
@@ -60,13 +63,30 @@ class PineTimeConnectionService : Service() {
     super.onDestroy()
   }
 
+  private fun upkeepPhoneNotificationContent() {
+    combine(
+      stepsFlow,
+      heartRateFlow,
+    ) { steps, hr ->
+      "HR: $hr Steps: $steps"
+    }
+      .sample(2_000L)
+      .onEach { notificationText ->
+        notificationManager.notify(
+          ID_NOTIFICATION,
+          notificationBuilder.setContentText(notificationText).build()
+        )
+      }
+      .launchIn(connectionScope)
+  }
+
   private fun sendNotification(
     connection: BluetoothConnection,
     notification: PineTimeNotification
   ) {
     connectionScope.launch {
       val characteristic = notificationCharacteristic
-        ?: connection.findCharacteristic(UUID_NOTIFICATION_SERVICE)?.also { characteristic ->
+        ?: connection.findCharacteristic(UUID_NOTIFICATION)?.also { characteristic ->
           notificationCharacteristic = characteristic
         }
 
@@ -106,17 +126,26 @@ class PineTimeConnectionService : Service() {
     connection.applyInScope {
       findCharacteristic(UUID_HEART_RATE)
         ?.let { char ->
-          enableNotificationsFor(char, UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"))
+          enableNotificationsFor(char, UUID_DESCRIPTOR_NOTIFY)
 
           char.observeNotifications()
         }
-        ?.sample(2_000L)
-        ?.onEach { data ->
-          notificationManager.notify(
-            ID_NOTIFICATION,
-            notificationBuilder.setContentText("HR: ${ByteBuffer.wrap(data).short}").build()
-          )
+        ?.map { ByteBuffer.wrap(it).short.toInt() }
+        ?.onEach(heartRateFlow::emit)
+        ?.launchIn(connectionScope)
+    }
+  }
+
+  private fun subscribeToSteps(connection: BluetoothConnection) {
+    connection.applyInScope {
+      findCharacteristic(UUID_MOTION)
+        ?.let { motionChar ->
+          enableNotificationsFor(motionChar, UUID_DESCRIPTOR_NOTIFY)
+
+          motionChar.observeNotifications()
         }
+        ?.map { it.firstOrNull()?.toInt() ?: 0 }
+        ?.onEach(stepsFlow::emit)
         ?.launchIn(connectionScope)
     }
   }
@@ -135,6 +164,10 @@ class PineTimeConnectionService : Service() {
     private const val ID_CONNECTION_CHANNEL = "connection_channel"
 
     private val UUID_HEART_RATE = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
-    private val UUID_NOTIFICATION_SERVICE = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb")
+
+    private val UUID_MOTION = UUID.fromString("00030001-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_NOTIFICATION = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb")
+
+    private val UUID_DESCRIPTOR_NOTIFY = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
   }
 }
