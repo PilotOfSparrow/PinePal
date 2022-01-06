@@ -22,6 +22,7 @@ class PineTimeConnectionService : Service() {
 
   private val stepsFlow = MutableStateFlow(0)
   private val heartRateFlow = MutableStateFlow(0)
+  private val batteryLevelFlow = MutableStateFlow(-1)
   private val connectionStateFlow = MutableStateFlow(BleConnectionState.DISCONNECTED)
 
   private val notificationManager by lazy { NotificationManagerCompat.from(applicationContext) }
@@ -60,15 +61,16 @@ class PineTimeConnectionService : Service() {
     combine(
       stepsFlow,
       heartRateFlow,
+      batteryLevelFlow,
       connectionStateFlow,
-    ) { steps, hr, connectionState ->
+    ) { steps, hr, batteryLevel, connectionState ->
       val title = if (connectionState == BleConnectionState.CONNECTED) {
         "Connected"
       } else {
         "Disconnected"
       }
 
-      title to "HR: $hr Steps: $steps"
+      title to "HR: $hr Steps: $steps Battery: ${batteryLevel}%"
     }
       .sample(2_000L)
       .onEach { (title, text) ->
@@ -88,6 +90,7 @@ class PineTimeConnectionService : Service() {
       .onEach { connection ->
         subscribeToSteps(connection)
         subscribeToHeartRate(connection)
+        subscribeToBatteryLevel(connection)
         subscribeToConnectionState(connection)
       }
       .combine(observeNotifications()) { connection, notification ->
@@ -172,8 +175,35 @@ class PineTimeConnectionService : Service() {
             motionChar.observeNotifications(),
           )
         }
-        ?.map { it?.firstOrNull()?.toInt() ?: 0 }
+        ?.map { motionData ->
+          val steps = motionData?.firstOrNull()?.toInt() ?: 0
+
+          steps
+        }
         ?.onEach(stepsFlow::emit)
+        ?.launchIn(connectionScope)
+    }
+  }
+
+  private fun subscribeToBatteryLevel(connection: BluetoothConnection) {
+    connection.applyInScope {
+      findCharacteristic(UUID_BATTERY_LEVEL)
+        ?.let { batteryLevelChar ->
+          enableNotificationsFor(batteryLevelChar, UUID_DESCRIPTOR_NOTIFY)
+
+          merge(
+            flowOf(batteryLevelChar.read()),
+            batteryLevelChar.observeNotifications(),
+          )
+        }
+        ?.map { batteryLevel ->
+          batteryLevel
+            ?.takeIf(ByteArray::isNotEmpty)
+            ?.firstOrNull()
+            ?.toInt()
+            ?: 0
+        }
+        ?.onEach(batteryLevelFlow::emit)
         ?.launchIn(connectionScope)
     }
   }
@@ -197,9 +227,10 @@ class PineTimeConnectionService : Service() {
     private const val ID_NOTIFICATION = 37
     private const val ID_CONNECTION_CHANNEL = "connection_channel"
 
-    private val UUID_HEART_RATE = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
-
     private val UUID_MOTION = UUID.fromString("00030001-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_HEART_RATE = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
+    private val UUID_BATTERY_LEVEL = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+
     private val UUID_NOTIFICATION = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb")
 
     private val UUID_DESCRIPTOR_NOTIFY = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
