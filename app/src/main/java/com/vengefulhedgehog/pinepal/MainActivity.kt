@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -574,8 +575,9 @@ class MainActivity : ComponentActivity() {
 
         val firmwareFiles = tmpFirmwareFolder.listFiles()!!
 
-        val fileBin = firmwareFiles.first { ".bin" in it.name }
         val fileDat = firmwareFiles.first { ".dat" in it.name }
+        val fileBin = firmwareFiles.first { ".bin" in it.name }
+        val fileBinSize = fileBin.length()
 
         val controlPointCharacteristic =
           findCharacteristic(UUID.fromString("00001531-1212-efde-1523-785feabcd123"))
@@ -599,7 +601,7 @@ class MainActivity : ComponentActivity() {
         val binFileSizeArray = ByteBuffer
           .allocate(4)
           .order(ByteOrder.LITTLE_ENDIAN)
-          .putInt(fileBin.length().toInt())
+          .putInt(fileBinSize.toInt())
           .array()
 
         packetCharacteristic.write(ByteArray(8) + binFileSizeArray)
@@ -631,25 +633,32 @@ class MainActivity : ComponentActivity() {
 
         Log.i("DFU", "Step 7")
 
-        val binFile = fileBin.readBytes()
+        var sentBytesCount = 0L
+        val firmwareSegment = ByteArray(DFU_SEGMENT_SIZE)
+        var confirmationCountDown = confirmationNotificationsInterval
 
-        val segmentSize = 20
-        val batchSize = segmentSize * confirmationNotificationsInterval
-        for (batchIndex in binFile.indices step batchSize) {
-          Log.i("DFU_UPLOAD", "Sending batch $batchIndex")
-
-          for (segmentIndex in batchIndex until batchIndex + batchSize step segmentSize) {
+        FileInputStream(fileBin).use { fileStream ->
+          var segmentBytesCount = fileStream.read(firmwareSegment)
+          while (segmentBytesCount > 0) {
             packetCharacteristic.write(
-              binFile.sliceArray(
-                segmentIndex until (segmentIndex + segmentSize).coerceAtMost(binFile.size)
-              )
+              if (segmentBytesCount == firmwareSegment.size) {
+                firmwareSegment
+              } else {
+                firmwareSegment.sliceArray(0 until segmentBytesCount)
+              }
             )
-          }
 
-          if (batchIndex + batchSize < binFile.lastIndex) {
-            Log.i("DFU_UPLOAD", "Wait approve for $batchIndex")
+            sentBytesCount += segmentBytesCount
 
-            controlPointCharacteristic.awaitNotification(startsWith = 0x11)
+            if (sentBytesCount == fileBinSize) break
+
+            if (--confirmationCountDown == 0) {
+              confirmationCountDown = confirmationNotificationsInterval
+
+              controlPointCharacteristic.awaitNotification(startsWith = 0x11)
+            }
+
+            segmentBytesCount = fileStream.read(firmwareSegment)
           }
         }
 
@@ -770,6 +779,8 @@ class MainActivity : ComponentActivity() {
     private const val KEY_CONNECTED_DEVICE_MAC = "connected_device_mac"
 
     private const val FIRMWARE_TMP_FOLDER_NAME = "tmp_firmware"
+
+    private const val DFU_SEGMENT_SIZE = 20
   }
 
 }

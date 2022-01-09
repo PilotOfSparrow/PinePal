@@ -7,9 +7,7 @@ import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
 
 class PinePalNotificationListener : NotificationListenerService() {
 
-  override fun onListenerConnected() {
-    println(activeNotifications)
-  }
+  override fun onListenerConnected() = Unit
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
     if (sbn.id == 37) return

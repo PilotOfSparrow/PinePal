@@ -132,24 +132,22 @@ class BluetoothConnection(
 
   suspend fun BluetoothGattCharacteristic.awaitNotification(
     expectedContent: ByteArray,
-  ): Boolean {
-    return bleCallback.observeNotifications(this.uuid)
-      .map { notificationContent ->
+  ) {
+    bleCallback.observeNotifications(this.uuid)
+      .filter { notificationContent ->
         notificationContent.contentEquals(expectedContent)
       }
       .take(1)
-      .firstOrNull() == true
+      .collect()
   }
 
   suspend fun BluetoothGattCharacteristic.awaitNotification(
-    startsWith: Int,
-  ): Boolean {
-    return bleCallback.observeNotifications(this.uuid)
-      .map { notificationContent ->
-        notificationContent.firstOrNull() == startsWith.toByte()
-      }
+    startsWith: Byte,
+  ) {
+    bleCallback.observeNotifications(this.uuid)
+      .filter { it.firstOrNull() == startsWith }
       .take(1)
-      .firstOrNull() == true
+      .collect()
   }
 
   companion object {
