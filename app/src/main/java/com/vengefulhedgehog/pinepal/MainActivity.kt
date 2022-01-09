@@ -619,7 +619,7 @@ class MainActivity : ComponentActivity() {
 
         Log.i("DFU", "Step 5")
 
-        val confirmationNotificationsInterval = 0x0A
+        val confirmationNotificationsInterval = 0x64
         controlPointCharacteristic.write(
           byteArrayOf(
             0x08,
