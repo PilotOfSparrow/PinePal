@@ -537,7 +537,7 @@ class MainActivity : ComponentActivity() {
         throw IllegalStateException("Can't create tmp folder for firmware")
       }
 
-      val outputBuffer = ByteArray(512)
+      val outputBuffer = ByteArray(1024 * 500)
 
       contentResolver.openInputStream(firmwareUri)?.use { inputStream ->
         ZipInputStream(inputStream).use { zipStream ->
