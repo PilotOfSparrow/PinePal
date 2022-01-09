@@ -11,8 +11,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.content.res.AssetManager
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -53,30 +53,18 @@ import com.vengefulhedgehog.pinepal.ui.theme.Purple500
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
 import java.util.*
+import java.util.zip.ZipInputStream
 
 class MainActivity : ComponentActivity() {
-
-  private val datFile: ByteArray by lazy {
-    assets
-      .open("pinetime-mcuboot-app-image-1.7.1.dat")
-      .let {
-        (it as AssetManager.AssetInputStream).use(AssetManager.AssetInputStream::readBytes)
-      }
-  }
-
-  private val binFile: ByteArray by lazy {
-    assets
-      .open("pinetime-mcuboot-app-image-1.7.1.bin")
-      .let {
-        (it as AssetManager.AssetInputStream).use(AssetManager.AssetInputStream::readBytes)
-      }
-  }
 
   private val state = MutableStateFlow<ViewState>(ViewState.Loading)
 
@@ -101,6 +89,12 @@ class MainActivity : ComponentActivity() {
     ActivityResultContracts.StartActivityForResult(),
   ) {
     checkRequiredPermissions()
+  }
+  private val firmwareSelectionLauncher = registerForActivityResult(
+    ActivityResultContracts.OpenDocument()
+  ) { fileUri ->
+    // check ends with .zip
+    onFirmwareSelected(fileUri)
   }
 
   private val locationBroadcastReceiver = object : BroadcastReceiver() {
@@ -357,7 +351,7 @@ class MainActivity : ComponentActivity() {
   private fun requestAction(action: BleAction) {
     when (action) {
       BleAction.SYNC_TIME -> syncTime(connectedDevice.value!!)
-      BleAction.START_DFU -> startDfu(connectedDevice.value!!)
+      BleAction.START_DFU -> firmwareSelectionLauncher.launch(arrayOf("application/zip"))
     }
   }
 
@@ -521,18 +515,75 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private fun startDfu(connection: BluetoothConnection) {
-    lifecycleScope.launch(Dispatchers.Default) {
+  private fun onFirmwareSelected(firmwareUri: Uri?) {
+    if (firmwareUri == null || ".zip" !in firmwareUri.toString()) {
+      // TODO inform user about mistakes of his path (or her, or wtw)
+      return
+    }
+
+    lifecycleScope.launch(Dispatchers.IO) {
+      unzipFirmware(firmwareUri)
+      startDfu(connectedDevice.value!!)
+    }
+  }
+
+  private suspend fun unzipFirmware(firmwareUri: Uri) {
+    withContext(Dispatchers.IO) {
+      val tmpDir = File(cacheDir, FIRMWARE_TMP_FOLDER_NAME)
+        .also(File::deleteRecursively) // To make sure we don't have leftovers
+
+      if (!tmpDir.mkdir()) {
+        throw IllegalStateException("Can't create tmp folder for firmware")
+      }
+
+      val outputBuffer = ByteArray(512)
+
+      contentResolver.openInputStream(firmwareUri)?.use { inputStream ->
+        ZipInputStream(inputStream).use { zipStream ->
+          var entry = zipStream.nextEntry
+
+          while (entry != null) {
+            FileOutputStream(File(tmpDir, entry.name)).use { fileOutput ->
+              var len = zipStream.read(outputBuffer)
+              while (len > 0) {
+                fileOutput.write(outputBuffer, 0, len)
+
+                len = zipStream.read(outputBuffer)
+              }
+            }
+
+            zipStream.closeEntry()
+
+            entry = zipStream.nextEntry
+          }
+
+          zipStream.closeEntry()
+        }
+      }
+    }
+  }
+
+  private suspend fun startDfu(connection: BluetoothConnection) {
+    withContext(Dispatchers.Default) {
       connection.apply {
         Log.i("DFU", "Initialization")
+
+        val tmpFirmwareFolder = cacheDir.listFiles()
+          .orEmpty()
+          .first { it.name == FIRMWARE_TMP_FOLDER_NAME }
+
+        val firmwareFiles = tmpFirmwareFolder.listFiles()!!
+
+        val fileBin = firmwareFiles.first { ".bin" in it.name }
+        val fileDat = firmwareFiles.first { ".dat" in it.name }
 
         val controlPointCharacteristic =
           findCharacteristic(UUID.fromString("00001531-1212-efde-1523-785feabcd123"))
         val packetCharacteristic =
           findCharacteristic(UUID.fromString("00001532-1212-efde-1523-785feabcd123"))
 
-        checkNotNull(controlPointCharacteristic)
         checkNotNull(packetCharacteristic)
+        checkNotNull(controlPointCharacteristic)
 
         enableNotificationsFor(
           characteristic = controlPointCharacteristic,
@@ -548,7 +599,7 @@ class MainActivity : ComponentActivity() {
         val binFileSizeArray = ByteBuffer
           .allocate(4)
           .order(ByteOrder.LITTLE_ENDIAN)
-          .putInt(binFile.size)
+          .putInt(fileBin.length().toInt())
           .array()
 
         packetCharacteristic.write(ByteArray(8) + binFileSizeArray)
@@ -560,7 +611,7 @@ class MainActivity : ComponentActivity() {
 
         Log.i("DFU", "Step 4")
 
-        packetCharacteristic.write(datFile)
+        packetCharacteristic.write(fileDat.readBytes())
         controlPointCharacteristic.write(byteArrayOf(0x02, 0x01))
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x02, 0x01))
 
@@ -579,6 +630,8 @@ class MainActivity : ComponentActivity() {
         controlPointCharacteristic.write(byteArrayOf(0x03))
 
         Log.i("DFU", "Step 7")
+
+        val binFile = fileBin.readBytes()
 
         val segmentSize = 20
         val batchSize = segmentSize * confirmationNotificationsInterval
@@ -610,6 +663,10 @@ class MainActivity : ComponentActivity() {
         Log.i("DFU", "Step 9")
 
         controlPointCharacteristic.write(byteArrayOf(0x05))
+
+        Log.i("DFU", "Finalization")
+
+        tmpFirmwareFolder.deleteRecursively()
       }
     }
   }
@@ -711,6 +768,8 @@ class MainActivity : ComponentActivity() {
   companion object {
     private const val KEY_SHARED_PREF = "pine_pal_shared_prefs"
     private const val KEY_CONNECTED_DEVICE_MAC = "connected_device_mac"
+
+    private const val FIRMWARE_TMP_FOLDER_NAME = "tmp_firmware"
   }
 
 }
