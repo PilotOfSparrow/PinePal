@@ -25,10 +25,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Button
-import androidx.compose.material.CircularProgressIndicator
-import androidx.compose.material.Surface
-import androidx.compose.material.Text
+import androidx.compose.material.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -78,6 +75,7 @@ class MainActivity : ComponentActivity() {
   private val notificationsAccessGranted = MutableStateFlow(false)
 
   private val firmwareVersion = MutableStateFlow<String?>(null)
+  private val dfuProgress = MutableStateFlow<DfuProgress?>(null)
   private val connectedDevice: StateFlow<BluetoothConnection?>
     get() = (application as App).connectedDevice.asStateFlow()
 
@@ -221,13 +219,17 @@ class MainActivity : ComponentActivity() {
             name = connectedDevice.device.name.orEmpty(),
             address = connectedDevice.device.address.orEmpty(),
             firmwareVersion = firmwareVersion ?: "<fetching>",
-
-            )
+          )
         }
       }
       .combine(notificationsAccessGranted) { connectedDevice, notificationsAccessGranted ->
         connectedDevice?.copy(
           notificationAccessGranted = notificationsAccessGranted,
+        )
+      }
+      .combine(dfuProgress) { connectedDevice, dfuProgress ->
+        connectedDevice?.copy(
+          dfuProgress = dfuProgress,
         )
       }
       .flowOn(Dispatchers.Default)
@@ -257,7 +259,7 @@ class MainActivity : ComponentActivity() {
         ?: permissionsAndServices
         ?: ViewState.Loading
     }
-      .debounce(300L)
+      .sample(300L)
       .flowOn(Dispatchers.Default)
       .onEach(state::emit)
       .launchIn(lifecycleScope)
@@ -311,40 +313,71 @@ class MainActivity : ComponentActivity() {
         text = "Firmware version ${deviceInfo.firmwareVersion}",
         modifier = Modifier.padding(top = 8.dp)
       )
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-      ) {
-        Text(text = "Notifications access status")
+      if (deviceInfo.dfuProgress == null) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+          horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+          Text(text = "Notifications access status")
 
-        if (deviceInfo.notificationAccessGranted) {
-          Text(text = "Granted")
-        } else {
-          Button(
-            modifier = Modifier.padding(12.dp),
-            onClick = { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }) {
-            Text(text = "Grant")
+          if (deviceInfo.notificationAccessGranted) {
+            Text(text = "Granted")
+          } else {
+            Button(
+              modifier = Modifier.padding(12.dp),
+              onClick = { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }) {
+              Text(text = "Grant")
+            }
           }
         }
-      }
-      Button(
-        onClick = { requestAction(BleAction.SYNC_TIME) },
-        modifier = Modifier
-          .fillMaxWidth()
-          .padding(top = 20.dp)
-      ) {
-        Text(text = "Sync time")
-      }
-      Button(
-        onClick = { requestAction(BleAction.START_DFU) },
-        modifier = Modifier
-          .fillMaxWidth()
-          .align(Alignment.CenterHorizontally)
-          .padding(top = 20.dp)
-      ) {
-        Text(text = "Start Firmware Update")
+        Button(
+          onClick = { requestAction(BleAction.SYNC_TIME) },
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 20.dp)
+        ) {
+          Text(text = "Sync time")
+        }
+        Button(
+          onClick = { requestAction(BleAction.START_DFU) },
+          modifier = Modifier
+            .fillMaxWidth()
+            .align(Alignment.CenterHorizontally)
+            .padding(top = 20.dp)
+        ) {
+          Text(text = "Start Firmware Update")
+        }
+      } else {
+        if (deviceInfo.dfuProgress is DfuProgress.Step7) {
+          Text(
+            text = "Sending firmware: ${deviceInfo.dfuProgress.sentBytes} / ${deviceInfo.dfuProgress.firmwareSizeInBytes}",
+            modifier = Modifier
+              .padding(top = 20.dp)
+              .align(Alignment.CenterHorizontally)
+          )
+          LinearProgressIndicator(
+            progress = deviceInfo.dfuProgress.run { sentBytes.toFloat() / firmwareSizeInBytes },
+            color = Color.Magenta,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 20.dp)
+          )
+        } else {
+          Text(
+            text = deviceInfo.dfuProgress.description,
+            modifier = Modifier
+              .padding(top = 20.dp)
+              .align(Alignment.CenterHorizontally)
+          )
+          LinearProgressIndicator(
+            color = Color.Magenta,
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(top = 20.dp)
+          )
+        }
       }
     }
   }
@@ -592,11 +625,11 @@ class MainActivity : ComponentActivity() {
           notificationsDescriptorUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"),
         )
 
-        Log.i("DFU", "Step 1")
+        dfuProgress.emit(DfuProgress.Step1)
 
         controlPointCharacteristic.write(byteArrayOf(0x01, 0x04))
 
-        Log.i("DFU", "Step 2")
+        dfuProgress.emit(DfuProgress.Step2)
 
         val binFileSizeArray = ByteBuffer
           .allocate(4)
@@ -607,17 +640,17 @@ class MainActivity : ComponentActivity() {
         packetCharacteristic.write(ByteArray(8) + binFileSizeArray)
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x01, 0x01))
 
-        Log.i("DFU", "Step 3")
+        dfuProgress.emit(DfuProgress.Step3)
 
         controlPointCharacteristic.write(byteArrayOf(0x02, 0x00))
 
-        Log.i("DFU", "Step 4")
+        dfuProgress.emit(DfuProgress.Step4)
 
         packetCharacteristic.write(fileDat.readBytes())
         controlPointCharacteristic.write(byteArrayOf(0x02, 0x01))
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x02, 0x01))
 
-        Log.i("DFU", "Step 5")
+        dfuProgress.emit(DfuProgress.Step5)
 
         val confirmationNotificationsInterval = 0x64
         controlPointCharacteristic.write(
@@ -627,11 +660,16 @@ class MainActivity : ComponentActivity() {
           )
         )
 
-        Log.i("DFU", "Step 6")
+        dfuProgress.emit(DfuProgress.Step6)
 
         controlPointCharacteristic.write(byteArrayOf(0x03))
 
-        Log.i("DFU", "Step 7")
+        dfuProgress.emit(
+          DfuProgress.Step7(
+            sentBytes = 0L,
+            firmwareSizeInBytes = fileBinSize,
+          )
+        )
 
         var sentBytesCount = 0L
         val firmwareSegment = ByteArray(DFU_SEGMENT_SIZE)
@@ -644,11 +682,18 @@ class MainActivity : ComponentActivity() {
               if (segmentBytesCount == firmwareSegment.size) {
                 firmwareSegment
               } else {
-                firmwareSegment.sliceArray(0 until segmentBytesCount)
+                firmwareSegment.copyOfRange(0, segmentBytesCount)
               }
             )
 
             sentBytesCount += segmentBytesCount
+
+            dfuProgress.emit(
+              DfuProgress.Step7(
+                sentBytes = sentBytesCount,
+                firmwareSizeInBytes = fileBinSize,
+              )
+            )
 
             if (sentBytesCount == fileBinSize) break
 
@@ -664,18 +709,20 @@ class MainActivity : ComponentActivity() {
 
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x03, 0x01))
 
-        Log.i("DFU", "Step 8")
+        dfuProgress.emit(DfuProgress.Step8)
 
         controlPointCharacteristic.write(byteArrayOf(0x04))
         controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x04, 0x01))
 
-        Log.i("DFU", "Step 9")
+        dfuProgress.emit(DfuProgress.Step9)
 
         controlPointCharacteristic.write(byteArrayOf(0x05))
 
         Log.i("DFU", "Finalization")
 
         tmpFirmwareFolder.deleteRecursively()
+
+        dfuProgress.emit(null)
       }
     }
   }
@@ -749,8 +796,32 @@ class MainActivity : ComponentActivity() {
       val name: String,
       val address: String,
       val firmwareVersion: String,
+      val dfuProgress: DfuProgress? = null,
       val notificationAccessGranted: Boolean = false,
     ) : ViewState
+  }
+
+  sealed class DfuProgress(val description: String) {
+    object Step1 : DfuProgress("Initializing firmware update")
+
+    object Step2 : DfuProgress("Sending size of firmware")
+
+    object Step3 : DfuProgress("Preparing to send dat file")
+
+    object Step4 : DfuProgress("Sending dat file")
+
+    object Step5 : DfuProgress("Negotiate confirmation intervals")
+
+    object Step6 : DfuProgress("Preparing to send firmware")
+
+    data class Step7(
+      val sentBytes: Long,
+      val firmwareSizeInBytes: Long,
+    ) : DfuProgress("Step 7")
+
+    object Step8 : DfuProgress("Received image validation")
+
+    object Step9 : DfuProgress("Activate new firmware")
   }
 
   private val Context.notificationsListeners: Set<String>
