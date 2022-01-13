@@ -104,23 +104,25 @@ class PineTimeConnectionService : Service() {
     notification: PineTimeNotification
   ) {
     connectionScope.launch {
-      val characteristic = notificationCharacteristic
-        ?: connection.findCharacteristic(UUID_NOTIFICATION)?.also { characteristic ->
-          notificationCharacteristic = characteristic
-        }
+      connection.perform {
+        val characteristic = notificationCharacteristic
+          ?: findCharacteristic(UUID_NOTIFICATION)?.also { characteristic ->
+            notificationCharacteristic = characteristic
+          }
 
-      characteristic?.let {
-        connection.apply {
-          val notificationBytes = byteArrayOf(
-            0x00.toByte(), // category
-            0x01.toByte(), // amount of notifications
-            0x00.toByte()  // content separator
-          ) +
-              notification.title.encodeToByteArray() +
-              0x00.toByte() +
-              notification.body.encodeToByteArray()
+        characteristic?.let {
+          connection.apply {
+            val notificationBytes = byteArrayOf(
+              0x00.toByte(), // category
+              0x01.toByte(), // amount of notifications
+              0x00.toByte()  // content separator
+            ) +
+                notification.title.encodeToByteArray() +
+                0x00.toByte() +
+                notification.body.encodeToByteArray()
 
-          characteristic.write(notificationBytes)
+            characteristic.write(notificationBytes)
+          }
         }
       }
     }
@@ -216,9 +218,9 @@ class PineTimeConnectionService : Service() {
 
   private fun BluetoothConnection.applyInScope(
     scope: CoroutineScope = connectionScope,
-    block: suspend BluetoothConnection.() -> Unit,
+    block: suspend BluetoothConnection.BleActions.() -> Unit,
   ): BluetoothConnection {
-    scope.launch { block() }
+    scope.launch { this@applyInScope.perform(block) }
 
     return this
   }

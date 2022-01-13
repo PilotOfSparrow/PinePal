@@ -27,7 +27,8 @@ class BluetoothConnection(
     bleCallback,
   )
 
-  private val mutex = Mutex()
+  private val bleActions = BleActions(gatt, bleCallback)
+  private val actionsMutex = Mutex()
 
   private val scope = CoroutineScope(Dispatchers.Default + Job())
 
@@ -56,98 +57,110 @@ class BluetoothConnection(
     scope.cancel()
   }
 
-  suspend fun listServices(): List<BluetoothGattService> {
-    if (gatt.services.isEmpty()) {
-      bleCallback.connectionState
-        .filter { it == BleConnectionState.CONNECTED }
-        .map {
-          gatt.discoverServices()
+  suspend fun perform(actions: suspend BleActions.() -> Unit) {
+    actionsMutex.withLock {
+      actions.invoke(bleActions)
+    }
+  }
 
-          bleCallback.awaitServiceDiscovered()
-        }
-        .firstOrNull()
+  suspend fun <T> performForResult(actions: suspend BleActions.() -> T): T {
+    return actionsMutex.withLock {
+      actions.invoke(bleActions)
+    }
+  }
+
+  class BleActions(
+    private val gatt: BluetoothGatt,
+    private val bleCallback: BleCallback,
+  ) {
+
+    suspend fun listServices(): List<BluetoothGattService> {
+      if (gatt.services.isEmpty()) {
+        bleCallback.connectionState
+          .filter { it == BleConnectionState.CONNECTED }
+          .map {
+            gatt.discoverServices()
+
+            bleCallback.awaitServiceDiscovered()
+          }
+          .firstOrNull()
+      }
+
+      return gatt.services
     }
 
-    return gatt.services
-  }
+    suspend fun findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? {
+      return listServices()
+        .find { service ->
+          service.characteristics.find { it.uuid == uuid } != null
+        }
+        ?.getCharacteristic(uuid)
+    }
 
-  suspend fun findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? {
-    return listServices()
-      .find { service ->
-        service.characteristics.find { it.uuid == uuid } != null
-      }
-      ?.getCharacteristic(uuid)
-  }
+    suspend fun enableNotificationsFor(
+      characteristic: BluetoothGattCharacteristic,
+      notificationsDescriptorUuid: UUID,
+    ) {
+      val notifDescriptor = characteristic
+        .descriptors
+        .first { it.uuid == notificationsDescriptorUuid }
 
-  fun BluetoothGattCharacteristic.observeNotifications(): Flow<ByteArray> =
-    bleCallback
-      .observeNotifications(this.uuid)
+      gatt.setCharacteristicNotification(characteristic, true)
 
-  suspend fun enableNotificationsFor(
-    characteristic: BluetoothGattCharacteristic,
-    notificationsDescriptorUuid: UUID,
-  ) {
-    val notifDescriptor = characteristic
-      .descriptors
-      .first { it.uuid == notificationsDescriptorUuid }
+      notifDescriptor.write(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+    }
 
-    gatt.setCharacteristicNotification(characteristic, true)
-
-    notifDescriptor.write(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-  }
-
-  suspend fun BluetoothGattCharacteristic.read(): ByteArray? {
-    return mutex.withLock {
-      if (gatt.readCharacteristic(this)) {
+    suspend fun BluetoothGattCharacteristic.read(): ByteArray? {
+      return if (gatt.readCharacteristic(this)) {
         bleCallback.awaitRead(uuid)
       } else {
         null
       }
     }
-  }
 
-  suspend fun BluetoothGattDescriptor.write(
-    bytes: ByteArray,
-  ) {
-    mutex.withLock {
+    suspend fun BluetoothGattDescriptor.write(
+      bytes: ByteArray,
+    ) {
       Log.i(TAG, "Writing to descriptor: ${this.uuid}")
 
       val written = gatt.writeDescriptor(this.apply { value = bytes })
 
       check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
     }
-  }
 
-  suspend fun BluetoothGattCharacteristic.write(
-    bytes: ByteArray,
-  ) {
-    mutex.withLock {
+    suspend fun BluetoothGattCharacteristic.write(
+      bytes: ByteArray,
+    ) {
       Log.i(TAG, "Writing to characteristic: ${this.uuid}")
 
       val written = gatt.writeCharacteristic(this.apply { value = bytes })
 
       check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
     }
-  }
 
-  suspend fun BluetoothGattCharacteristic.awaitNotification(
-    expectedContent: ByteArray,
-  ) {
-    bleCallback.observeNotifications(this.uuid)
-      .filter { notificationContent ->
-        notificationContent.contentEquals(expectedContent)
-      }
-      .take(1)
-      .collect()
-  }
+    fun BluetoothGattCharacteristic.observeNotifications(): Flow<ByteArray> =
+      bleCallback
+        .observeNotifications(this.uuid)
 
-  suspend fun BluetoothGattCharacteristic.awaitNotification(
-    startsWith: Byte,
-  ) {
-    bleCallback.observeNotifications(this.uuid)
-      .filter { it.firstOrNull() == startsWith }
-      .take(1)
-      .collect()
+    suspend fun BluetoothGattCharacteristic.awaitNotification(
+      expectedContent: ByteArray,
+    ) {
+      bleCallback.observeNotifications(this.uuid)
+        .filter { notificationContent ->
+          notificationContent.contentEquals(expectedContent)
+        }
+        .take(1)
+        .collect()
+    }
+
+    suspend fun BluetoothGattCharacteristic.awaitNotification(
+      startsWith: Byte,
+    ) {
+      bleCallback.observeNotifications(this.uuid)
+        .filter { it.firstOrNull() == startsWith }
+        .take(1)
+        .collect()
+    }
   }
 
   companion object {

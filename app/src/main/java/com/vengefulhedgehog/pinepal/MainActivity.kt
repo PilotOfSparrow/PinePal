@@ -508,7 +508,7 @@ class MainActivity : ComponentActivity() {
 
   private fun syncTime(connection: BluetoothConnection) {
     lifecycleScope.launch(Dispatchers.Default) {
-      connection.apply {
+      connection.perform {
         val timeChar = findCharacteristic(
           UUID.fromString("00002a2b-0000-1000-8000-00805f9b34fb")
         )
@@ -537,7 +537,7 @@ class MainActivity : ComponentActivity() {
 
   private fun fetchFirmwareVersion(connection: BluetoothConnection) {
     lifecycleScope.launch(Dispatchers.Default) {
-      val firmwareVersionString = connection.run {
+      val firmwareVersionString = connection.performForResult {
         val firmwareVersionChar = findCharacteristic(
           UUID.fromString("00002a26-0000-1000-8000-00805f9b34fb")
         )
@@ -580,7 +580,7 @@ class MainActivity : ComponentActivity() {
 
   private suspend fun startDfu(connection: BluetoothConnection) {
     withContext(Dispatchers.Default) {
-      connection.apply {
+      connection.perform {
         Log.i("DFU", "Initialization")
 
         val tmpFirmwareFolder = cacheDir.listFiles()
