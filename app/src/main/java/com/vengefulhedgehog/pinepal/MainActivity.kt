@@ -44,6 +44,7 @@ import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
 import com.vengefulhedgehog.pinepal.bluetooth.connect
+import com.vengefulhedgehog.pinepal.extensions.unzipAll
 import com.vengefulhedgehog.pinepal.ui.theme.BackgroundDark
 import com.vengefulhedgehog.pinepal.ui.theme.PinePalTheme
 import com.vengefulhedgehog.pinepal.ui.theme.Purple500
@@ -53,7 +54,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.Instant
@@ -570,28 +570,9 @@ class MainActivity : ComponentActivity() {
         throw IllegalStateException("Can't create tmp folder for firmware")
       }
 
-      val outputBuffer = ByteArray(1024 * 500)
-
       contentResolver.openInputStream(firmwareUri)?.use { inputStream ->
         ZipInputStream(inputStream).use { zipStream ->
-          var entry = zipStream.nextEntry
-
-          while (entry != null) {
-            FileOutputStream(File(tmpDir, entry.name)).use { fileOutput ->
-              var len = zipStream.read(outputBuffer)
-              while (len > 0) {
-                fileOutput.write(outputBuffer, 0, len)
-
-                len = zipStream.read(outputBuffer)
-              }
-            }
-
-            zipStream.closeEntry()
-
-            entry = zipStream.nextEntry
-          }
-
-          zipStream.closeEntry()
+          zipStream.unzipAll(tmpDir)
         }
       }
     }
