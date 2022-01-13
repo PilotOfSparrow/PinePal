@@ -49,6 +49,7 @@ import com.vengefulhedgehog.pinepal.ui.theme.BackgroundDark
 import com.vengefulhedgehog.pinepal.ui.theme.PinePalTheme
 import com.vengefulhedgehog.pinepal.ui.theme.Purple500
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -558,6 +559,16 @@ class MainActivity : ComponentActivity() {
     lifecycleScope.launch(Dispatchers.IO) {
       unzipFirmware(firmwareUri)
       startDfu(connectedDevice.value!!)
+
+      (application as App).connectedDevice.emit(null)
+
+      delay(10_000L) // Let watch to reboot in peace
+
+      bleScanStart()
+
+      connectedDevice.filterNotNull().first()
+
+      requestAction(BleAction.SYNC_TIME)
     }
   }
 
