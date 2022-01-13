@@ -34,7 +34,13 @@ class BluetoothConnection(
 
   init {
     bleCallback.connectionState
-      .onEach(_state::emit)
+      .onEach { connectionState ->
+        _state.emit(connectionState)
+
+        if (connectionState == BleConnectionState.DISCONNECTED) {
+          disconnect()
+        }
+      }
       .launchIn(scope)
   }
 
