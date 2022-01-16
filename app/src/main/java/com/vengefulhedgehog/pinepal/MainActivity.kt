@@ -337,7 +337,7 @@ class MainActivity : ComponentActivity() {
           }
         }
         Button(
-          onClick = { requestAction(BleAction.SYNC_TIME) },
+          onClick = { requestAction(DeviceScreenAction.SYNC_TIME) },
           modifier = Modifier
             .fillMaxWidth()
             .padding(top = 20.dp)
@@ -345,7 +345,7 @@ class MainActivity : ComponentActivity() {
           Text(text = "Sync time")
         }
         Button(
-          onClick = { requestAction(BleAction.START_DFU) },
+          onClick = { requestAction(DeviceScreenAction.START_DFU) },
           modifier = Modifier
             .fillMaxWidth()
             .align(Alignment.CenterHorizontally)
@@ -386,10 +386,10 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private fun requestAction(action: BleAction) {
+  private fun requestAction(action: DeviceScreenAction) {
     when (action) {
-      BleAction.SYNC_TIME -> syncTime(connectedDevice.value!!)
-      BleAction.START_DFU -> firmwareSelectionLauncher.launch(arrayOf("application/zip"))
+      DeviceScreenAction.SYNC_TIME -> syncTime(connectedDevice.value!!)
+      DeviceScreenAction.START_DFU -> firmwareSelectionLauncher.launch(arrayOf("application/zip"))
     }
   }
 
@@ -597,7 +597,7 @@ class MainActivity : ComponentActivity() {
 
         postDfuReconnectionRequested.emit(false)
 
-        requestAction(BleAction.SYNC_TIME)
+        requestAction(DeviceScreenAction.SYNC_TIME)
       } catch (e: Exception) {
         Log.e("Firmware update", "Failed to update firmware", e)
       }
@@ -798,7 +798,7 @@ class MainActivity : ComponentActivity() {
     else -> throw IllegalStateException("No discovery button action available for $this")
   }
 
-  enum class BleAction {
+  enum class DeviceScreenAction {
     SYNC_TIME,
     START_DFU,
   }
