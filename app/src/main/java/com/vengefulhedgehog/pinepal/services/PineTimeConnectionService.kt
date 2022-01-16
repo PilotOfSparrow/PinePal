@@ -4,13 +4,16 @@ import android.app.Notification
 import android.app.Service
 import android.bluetooth.BluetoothGattCharacteristic
 import android.content.Intent
+import android.media.AudioManager
 import android.os.IBinder
 import android.util.Log
+import android.view.KeyEvent
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 import com.vengefulhedgehog.pinepal.App
 import com.vengefulhedgehog.pinepal.bluetooth.BleConnectionState
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
+import com.vengefulhedgehog.pinepal.domain.media.ActiveMediaInfo
 import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -26,6 +29,10 @@ class PineTimeConnectionService : Service() {
   private val batteryLevelFlow = MutableStateFlow(-1)
   private val connectionStateFlow = MutableStateFlow(BleConnectionState.DISCONNECTED)
 
+  private val activeMediaInfo: StateFlow<ActiveMediaInfo?> by lazy {
+    (application as App).activeMediaInfo
+  }
+
   private val notificationManager by lazy { NotificationManagerCompat.from(applicationContext) }
   private val notificationBuilder by lazy {
     Notification.Builder(applicationContext, ID_CONNECTION_CHANNEL)
@@ -35,6 +42,8 @@ class PineTimeConnectionService : Service() {
       .setOngoing(true)
       .setOnlyAlertOnce(true)
   }
+
+  private val audioManager by lazy { getSystemService(AudioManager::class.java) }
 
   private var notificationCharacteristic: BluetoothGattCharacteristic? = null
 
@@ -93,14 +102,64 @@ class PineTimeConnectionService : Service() {
         subscribeToHeartRate(connection)
         subscribeToBatteryLevel(connection)
         subscribeToConnectionState(connection)
+
+        activeMediaInfo
+          .onEach(this::sendMediaInfo)
+          .launchIn(connectionScope)
+
+        connection.performInScope {
+          findCharacteristic(UUID_MEDIA_EVENTS)?.let { mediaChar ->
+            enableNotificationsFor(
+              mediaChar,
+              UUID_DESCRIPTOR_NOTIFY,
+            )
+
+            mediaChar
+              .observeNotifications()
+              .map { eventData -> eventData.firstOrNull()?.toMediaEvent() }
+              .filterNotNull()
+              .onEach { mediaEvent ->
+                when (mediaEvent) {
+                  MediaEvent.APP_OPEN -> {
+                    activeMediaInfo.value?.let { activeMediaInfo ->
+                      sendMediaInfo(activeMediaInfo)
+                    }
+                  }
+                  MediaEvent.PLAY -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                  MediaEvent.PAUSE -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                  MediaEvent.NEXT -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_NEXT)
+                  MediaEvent.PREVIOUS -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+                  MediaEvent.VOLUME_UP -> audioManager.volumeUp()
+                  MediaEvent.VOLUME_DOWN -> audioManager.volumeDown()
+                }
+              }
+              .launchIn(connectionScope)
+          }
+        }
       }
       .combine(observeNotifications()) { connection, notification ->
-        sendNotification(connection, notification)
+        notify(connection, notification)
       }
       .launchIn(connectionScope)
   }
 
-  private fun sendNotification(
+  private fun sendMediaInfo(activeMediaInfo: ActiveMediaInfo?) {
+    val connection = (application as App).connectedDevice.value ?: return
+
+    connection.performInScope {
+      val statusChar = findCharacteristic(UUID_MEDIA_STATUS)
+      val artistChar = findCharacteristic(UUID_MEDIA_ARTIST)
+      val trackChar = findCharacteristic(UUID_MEDIA_TRACK)
+      val albumChar = findCharacteristic(UUID_MEDIA_ALBUM)
+
+      statusChar?.write(activeMediaInfo?.encodedStatus ?: ByteArray(1))
+      artistChar?.write(activeMediaInfo?.encodeArtist ?: ByteArray(1))
+      trackChar?.write(activeMediaInfo?.encodedTitle ?: ByteArray(1))
+      albumChar?.write(activeMediaInfo?.encodedAlbum ?: ByteArray(1))
+    }
+  }
+
+  private fun notify(
     connection: BluetoothConnection,
     notification: PineTimeNotification
   ) {
@@ -147,7 +206,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun subscribeToHeartRate(connection: BluetoothConnection) {
-    connection.applyInScope {
+    connection.performInScope {
       findCharacteristic(UUID_HEART_RATE)
         ?.let { hrChar ->
           enableNotificationsFor(hrChar, UUID_DESCRIPTOR_NOTIFY)
@@ -170,7 +229,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun subscribeToSteps(connection: BluetoothConnection) {
-    connection.applyInScope {
+    connection.performInScope {
       findCharacteristic(UUID_MOTION)
         ?.let { motionChar ->
           enableNotificationsFor(motionChar, UUID_DESCRIPTOR_NOTIFY)
@@ -191,7 +250,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun subscribeToBatteryLevel(connection: BluetoothConnection) {
-    connection.applyInScope {
+    connection.performInScope {
       findCharacteristic(UUID_BATTERY_LEVEL)
         ?.let { batteryLevelChar ->
           enableNotificationsFor(batteryLevelChar, UUID_DESCRIPTOR_NOTIFY)
@@ -219,13 +278,50 @@ class PineTimeConnectionService : Service() {
       .launchIn(connectionScope)
   }
 
-  private fun BluetoothConnection.applyInScope(
+  private fun AudioManager.volumeUp() {
+    adjustVolume(AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+  }
+
+  private fun AudioManager.volumeDown() {
+    adjustVolume(AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+  }
+
+  private fun AudioManager.sendKeyEvent(event: Int) {
+    dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, event))
+    dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, event))
+  }
+
+  private fun BluetoothConnection.performInScope(
     scope: CoroutineScope = connectionScope,
     block: suspend BluetoothConnection.BleActions.() -> Unit,
   ): BluetoothConnection {
-    scope.launch { this@applyInScope.perform(block) }
+    scope.launch { perform(block) }
 
     return this
+  }
+
+  private fun Byte.toMediaEvent(): MediaEvent? = when (this) {
+    0xe0.toByte() -> MediaEvent.APP_OPEN
+    0x00.toByte() -> MediaEvent.PLAY
+    0x01.toByte() -> MediaEvent.PAUSE
+    0x03.toByte() -> MediaEvent.NEXT
+    0x04.toByte() -> MediaEvent.PREVIOUS
+    0x05.toByte() -> MediaEvent.VOLUME_UP
+    0x06.toByte() -> MediaEvent.VOLUME_DOWN
+    else -> null
+  }
+
+  private enum class MediaEvent {
+    APP_OPEN,
+
+    PLAY,
+    PAUSE,
+
+    NEXT,
+    PREVIOUS,
+
+    VOLUME_UP,
+    VOLUME_DOWN,
   }
 
   companion object {
@@ -235,6 +331,12 @@ class PineTimeConnectionService : Service() {
     private val UUID_MOTION = UUID.fromString("00030001-78fc-48fe-8e23-433b3a1942d0")
     private val UUID_HEART_RATE = UUID.fromString("00002a37-0000-1000-8000-00805f9b34fb")
     private val UUID_BATTERY_LEVEL = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+
+    private val UUID_MEDIA_EVENTS = UUID.fromString("00000001-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_MEDIA_STATUS = UUID.fromString("00000002-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_MEDIA_ARTIST = UUID.fromString("00000003-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_MEDIA_TRACK = UUID.fromString("00000004-78fc-48fe-8e23-433b3a1942d0")
+    private val UUID_MEDIA_ALBUM = UUID.fromString("00000005-78fc-48fe-8e23-433b3a1942d0")
 
     private val UUID_NOTIFICATION = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb")
 
