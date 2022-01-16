@@ -5,6 +5,7 @@ import android.app.Service
 import android.bluetooth.BluetoothGattCharacteristic
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 import com.vengefulhedgehog.pinepal.App
@@ -111,17 +112,19 @@ class PineTimeConnectionService : Service() {
           }
 
         characteristic?.let {
-          connection.apply {
-            val notificationBytes = byteArrayOf(
-              0x00.toByte(), // category
-              0x01.toByte(), // amount of notifications
-              0x00.toByte()  // content separator
-            ) +
-                notification.title.encodeToByteArray() +
-                0x00.toByte() +
-                notification.body.encodeToByteArray()
+          val notificationBytes = byteArrayOf(
+            0x00.toByte(), // category
+            0x01.toByte(), // amount of notifications
+            0x00.toByte()  // content separator
+          ) +
+              notification.title.encodeToByteArray() +
+              0x00.toByte() +
+              notification.body.encodeToByteArray()
 
+          try {
             characteristic.write(notificationBytes)
+          } catch (e: Exception) {
+            Log.e("ConnectionService", "Couldn't send notification", e)
           }
         }
       }

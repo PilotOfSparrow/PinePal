@@ -26,6 +26,8 @@ class BleCallback : BluetoothGattCallback() {
   override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
     val newConnectionState = when (newState) {
       BluetoothProfile.STATE_CONNECTED -> BleConnectionState.CONNECTED
+      BluetoothProfile.STATE_CONNECTING -> BleConnectionState.CONNECTING
+      BluetoothProfile.STATE_DISCONNECTING -> BleConnectionState.DISCONNECTING
       else -> BleConnectionState.DISCONNECTED
     }
 

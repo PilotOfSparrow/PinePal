@@ -3,10 +3,7 @@ package com.vengefulhedgehog.pinepal.bluetooth
 import android.bluetooth.*
 import android.content.Context
 import android.util.Log
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -113,14 +110,19 @@ class BluetoothConnection(
 
       gatt.setCharacteristicNotification(characteristic, true)
 
-      notifDescriptor.write(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+      withTimeout(OPERATION_TIMEOUT_MS) {
+        notifDescriptor.write(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+      }
     }
 
     suspend fun BluetoothGattCharacteristic.read(): ByteArray? {
-      return if (gatt.readCharacteristic(this)) {
-        bleCallback.awaitRead(uuid)
-      } else {
-        null
+      val charToRead = this
+      return withTimeout(OPERATION_TIMEOUT_MS) {
+        if (gatt.readCharacteristic(charToRead)) {
+          bleCallback.awaitRead(uuid)
+        } else {
+          null
+        }
       }
     }
 
@@ -130,8 +132,13 @@ class BluetoothConnection(
       Log.i(TAG, "Writing to descriptor: ${this.uuid}")
 
       val written = gatt.writeDescriptor(this.apply { value = bytes })
+      val writeResponse = withTimeout(OPERATION_TIMEOUT_MS) { bleCallback.awaitWrite(uuid) }
 
-      check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
+      check(written && writeResponse.contentEquals(bytes)) {
+        "Gatt write status: $written;\n" +
+            "Write payload: ${bytes.joinToString()};\n" +
+            "Response: ${writeResponse.joinToString()}"
+      }
     }
 
     suspend fun BluetoothGattCharacteristic.write(
@@ -140,8 +147,13 @@ class BluetoothConnection(
       Log.i(TAG, "Writing to characteristic: ${this.uuid}")
 
       val written = gatt.writeCharacteristic(this.apply { value = bytes })
+      val writeResponse = withTimeout(OPERATION_TIMEOUT_MS) { bleCallback.awaitWrite(uuid) }
 
-      check(written && bleCallback.awaitWrite(uuid).contentEquals(bytes))
+      check(written && writeResponse.contentEquals(bytes)) {
+        "Gatt write status: $written;\n" +
+            "Write payload: ${bytes.joinToString()};\n" +
+            "Response: ${writeResponse.joinToString()}"
+      }
     }
 
     fun BluetoothGattCharacteristic.observeNotifications(): Flow<ByteArray> =
@@ -171,5 +183,7 @@ class BluetoothConnection(
 
   companion object {
     private const val TAG = "BluetoothConnection"
+
+    private const val OPERATION_TIMEOUT_MS = 5_000L
   }
 }

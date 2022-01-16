@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
 
   private val foundDevices = MutableStateFlow(emptySet<BluetoothDevice>())
   private val discoveryProgress = MutableStateFlow(false)
+  private val postDfuReconnectionRequested = MutableStateFlow(false)
 
   private val locationEnabled = MutableStateFlow(false)
   private val bluetoothEnabled = MutableStateFlow(false)
@@ -198,12 +199,14 @@ class MainActivity : ComponentActivity() {
     val discovery = combine(
       foundDevices,
       discoveryProgress,
+      postDfuReconnectionRequested,
       requiredPermissionsAndServices,
-    ) { devices, discoveryInProgress, permissionsAndServices ->
-      if (permissionsAndServices == null) {
+    ) { devices, discoveryInProgress, postDfuReconnectionRequested, requiredPermissionsAndServices ->
+      if (requiredPermissionsAndServices == null) {
         ViewState.DevicesDiscovery(
           devices = devices.toList(),
           discoveryInProgress = discoveryInProgress,
+          postDfuReconnectionAttempt = postDfuReconnectionRequested,
         )
       } else {
         null
@@ -310,11 +313,11 @@ class MainActivity : ComponentActivity() {
         text = deviceInfo.address,
         modifier = Modifier.padding(top = 8.dp)
       )
-      Text(
-        text = "Firmware version ${deviceInfo.firmwareVersion}",
-        modifier = Modifier.padding(top = 8.dp)
-      )
       if (deviceInfo.dfuProgress == null) {
+        Text(
+          text = "Firmware version ${deviceInfo.firmwareVersion}",
+          modifier = Modifier.padding(top = 8.dp)
+        )
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -353,7 +356,7 @@ class MainActivity : ComponentActivity() {
       } else {
         if (deviceInfo.dfuProgress is DfuProgress.Step7) {
           Text(
-            text = "Sending firmware: ${deviceInfo.dfuProgress.sentBytes} / ${deviceInfo.dfuProgress.firmwareSizeInBytes}",
+            text = deviceInfo.dfuProgress.run { "$sentBytes / $firmwareSizeInBytes" },
             modifier = Modifier
               .padding(top = 20.dp)
               .align(Alignment.CenterHorizontally)
@@ -399,9 +402,14 @@ class MainActivity : ComponentActivity() {
           .padding(vertical = 20.dp)
       ) {
         val (title, buttonRefresh) = createRefs()
+        val text = if (discoveryInfo.postDfuReconnectionAttempt) {
+          "Attempting to reconnect"
+        } else {
+          "Discovering devices"
+        }
 
         Text(
-          text = "Discovered devices",
+          text = text,
           modifier = Modifier.constrainAs(title) {
             width = Dimension.preferredWrapContent
 
@@ -413,8 +421,13 @@ class MainActivity : ComponentActivity() {
               startMargin = 16.dp,
               horizontalBias = 0F,
             )
-          })
-        if (discoveryInfo.discoveryInProgress) {
+          }
+        )
+
+        val shouldShowProgress = discoveryInfo.run {
+          discoveryInProgress || postDfuReconnectionAttempt
+        }
+        if (shouldShowProgress) {
           CircularProgressIndicator(
             modifier = Modifier.constrainAs(buttonRefresh) {
               top.linkTo(parent.top)
@@ -435,24 +448,26 @@ class MainActivity : ComponentActivity() {
           )
         }
       }
-      LazyColumn(
-        modifier = Modifier
-          .fillMaxSize()
-          .background(BackgroundDark)
-      ) {
-        items(discoveryInfo.devices, key = { it.address }) { device ->
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .background(Purple500)
-              .padding(20.dp)
-              .clickable { connectDevice(device) }
-          ) {
-            Text(
-              text = device.name,
-              modifier = Modifier.fillMaxWidth()
-            )
-            Text(text = device.address, color = Color.LightGray, fontSize = 12.sp)
+      if (!discoveryInfo.postDfuReconnectionAttempt) {
+        LazyColumn(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(BackgroundDark)
+        ) {
+          items(discoveryInfo.devices, key = { it.address }) { device ->
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .background(Purple500)
+                .padding(20.dp)
+                .clickable { connectDevice(device) }
+            ) {
+              Text(
+                text = device.name,
+                modifier = Modifier.fillMaxWidth()
+              )
+              Text(text = device.address, color = Color.LightGray, fontSize = 12.sp)
+            }
           }
         }
       }
@@ -503,6 +518,10 @@ class MainActivity : ComponentActivity() {
     bleScanStop()
 
     lifecycleScope.launch {
+      if (postDfuReconnectionRequested.value) {
+        delay(10_000L) // Otherwise device disconnects after 2 sec for some reason
+      }
+
       (application as App).onDeviceConnected(device.connect(applicationContext))
     }
   }
@@ -556,19 +575,32 @@ class MainActivity : ComponentActivity() {
       return
     }
 
+    startFirmwareUpdate(firmwareUri)
+  }
+
+  private fun startFirmwareUpdate(firmwareUri: Uri) {
     lifecycleScope.launch(Dispatchers.IO) {
-      unzipFirmware(firmwareUri)
-      startDfu(connectedDevice.value!!)
+      try {
+        unzipFirmware(firmwareUri)
 
-      (application as App).connectedDevice.emit(null)
+        startDfu(connectedDevice.value!!)
 
-      delay(10_000L) // Let watch to reboot in peace
+        (application as App).connectedDevice.emit(null)
 
-      bleScanStart()
+        foundDevices.emit(emptySet())
+        firmwareVersion.emit(null)
+        postDfuReconnectionRequested.emit(true)
 
-      connectedDevice.filterNotNull().first()
+        bleScanStart()
 
-      requestAction(BleAction.SYNC_TIME)
+        connectedDevice.filterNotNull().first()
+
+        postDfuReconnectionRequested.emit(false)
+
+        requestAction(BleAction.SYNC_TIME)
+      } catch (e: Exception) {
+        Log.e("Firmware update", "Failed to update firmware", e)
+      }
     }
   }
 
@@ -591,9 +623,9 @@ class MainActivity : ComponentActivity() {
 
   private suspend fun startDfu(connection: BluetoothConnection) {
     withContext(Dispatchers.Default) {
-      connection.perform {
-        Log.i("DFU", "Initialization")
+      dfuProgress.emit(DfuProgress.Start)
 
+      connection.perform {
         val tmpFirmwareFolder = cacheDir.listFiles()
           .orEmpty()
           .first { it.name == FIRMWARE_TMP_FOLDER_NAME }
@@ -708,9 +740,13 @@ class MainActivity : ComponentActivity() {
 
         dfuProgress.emit(DfuProgress.Step9)
 
-        controlPointCharacteristic.write(byteArrayOf(0x05))
+        try {
+          controlPointCharacteristic.write(byteArrayOf(0x05))
+        } catch (e: Exception) {
+          Log.e("DFU", "Activation timeout") // Sometimes it's respond
+        }
 
-        Log.i("DFU", "Finalization")
+        dfuProgress.emit(DfuProgress.Finalization)
 
         tmpFirmwareFolder.deleteRecursively()
 
@@ -782,6 +818,7 @@ class MainActivity : ComponentActivity() {
     data class DevicesDiscovery(
       val devices: List<BluetoothDevice>,
       val discoveryInProgress: Boolean,
+      val postDfuReconnectionAttempt: Boolean = false,
     ) : ViewState
 
     data class ConnectedDevice(
@@ -794,9 +831,11 @@ class MainActivity : ComponentActivity() {
   }
 
   sealed class DfuProgress(val description: String) {
+    object Start : DfuProgress("Starting DFU")
+
     object Step1 : DfuProgress("Initializing firmware update")
 
-    object Step2 : DfuProgress("Sending size of firmware")
+    object Step2 : DfuProgress("Sending firmware size")
 
     object Step3 : DfuProgress("Preparing to send dat file")
 
@@ -809,11 +848,13 @@ class MainActivity : ComponentActivity() {
     data class Step7(
       val sentBytes: Long,
       val firmwareSizeInBytes: Long,
-    ) : DfuProgress("Step 7")
+    ) : DfuProgress("Sending firmware")
 
     object Step8 : DfuProgress("Received image validation")
 
     object Step9 : DfuProgress("Activate new firmware")
+
+    object Finalization : DfuProgress("Finalizing DFU")
   }
 
   private val Context.notificationsListeners: Set<String>
