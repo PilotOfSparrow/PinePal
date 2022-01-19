@@ -39,6 +39,7 @@ class PinePalNotificationListener : NotificationListenerService() {
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
     if (!sbn.isOngoing) return
+    if (sbn.notification.extras.get("android.mediaSession") != null) return
 
     val title = sbn.notification.extras.getString("android.title")
     val body = sbn.notification.extras.getString("android.text")
