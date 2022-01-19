@@ -16,6 +16,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -581,6 +582,12 @@ class MainActivity : ComponentActivity() {
   private fun startFirmwareUpdate(firmwareUri: Uri) {
     lifecycleScope.launch(Dispatchers.IO) {
       try {
+        withContext(Dispatchers.Main) {
+          window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+
+        dfuProgress.emit(DfuProgress.Start)
+
         unzipFirmware(firmwareUri)
 
         startDfu(connectedDevice.value!!)
@@ -600,6 +607,11 @@ class MainActivity : ComponentActivity() {
         requestAction(DeviceScreenAction.SYNC_TIME)
       } catch (e: Exception) {
         Log.e("Firmware update", "Failed to update firmware", e)
+        // TODO show prompt which would recommend to restart the watch before next attempt
+      } finally {
+        withContext(Dispatchers.Main) {
+          window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
       }
     }
   }
@@ -623,8 +635,6 @@ class MainActivity : ComponentActivity() {
 
   private suspend fun startDfu(connection: BluetoothConnection) {
     withContext(Dispatchers.Default) {
-      dfuProgress.emit(DfuProgress.Start)
-
       connection.perform {
         val tmpFirmwareFolder = cacheDir.listFiles()
           .orEmpty()
