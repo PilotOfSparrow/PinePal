@@ -109,11 +109,7 @@ class PineTimeConnectionService : Service() {
 
         connection.performInScope {
           findCharacteristic(UUID_MEDIA_EVENTS)?.let { mediaChar ->
-            enableNotificationsFor(
-              mediaChar,
-              UUID_DESCRIPTOR_NOTIFY,
-            )
-
+            mediaChar.enableNotifications()
             mediaChar
               .observeNotifications()
               .map { eventData -> eventData.firstOrNull()?.toMediaEvent() }
@@ -209,7 +205,7 @@ class PineTimeConnectionService : Service() {
     connection.performInScope {
       findCharacteristic(UUID_HEART_RATE)
         ?.let { hrChar ->
-          enableNotificationsFor(hrChar, UUID_DESCRIPTOR_NOTIFY)
+          hrChar.enableNotifications()
 
           merge(
             flowOf(hrChar.read()),
@@ -232,7 +228,7 @@ class PineTimeConnectionService : Service() {
     connection.performInScope {
       findCharacteristic(UUID_MOTION)
         ?.let { motionChar ->
-          enableNotificationsFor(motionChar, UUID_DESCRIPTOR_NOTIFY)
+          motionChar.enableNotifications()
 
           merge(
             flowOf(motionChar.read()),
@@ -253,7 +249,7 @@ class PineTimeConnectionService : Service() {
     connection.performInScope {
       findCharacteristic(UUID_BATTERY_LEVEL)
         ?.let { batteryLevelChar ->
-          enableNotificationsFor(batteryLevelChar, UUID_DESCRIPTOR_NOTIFY)
+          batteryLevelChar.enableNotifications()
 
           merge(
             flowOf(batteryLevelChar.read()),
@@ -339,7 +335,5 @@ class PineTimeConnectionService : Service() {
     private val UUID_MEDIA_ALBUM = UUID.fromString("00000005-78fc-48fe-8e23-433b3a1942d0")
 
     private val UUID_NOTIFICATION = UUID.fromString("00002a46-0000-1000-8000-00805f9b34fb")
-
-    private val UUID_DESCRIPTOR_NOTIFY = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
   }
 }

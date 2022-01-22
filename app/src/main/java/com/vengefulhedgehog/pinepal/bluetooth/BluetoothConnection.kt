@@ -115,6 +115,12 @@ class BluetoothConnection(
       }
     }
 
+    suspend fun BluetoothGattCharacteristic.enableNotifications(
+      notificationsDescriptorUuid: UUID = ServicesUuid.UUID_DESCRIPTOR_NOTIFY,
+    ) {
+      enableNotificationsFor(this, notificationsDescriptorUuid)
+    }
+
     suspend fun BluetoothGattCharacteristic.read(): ByteArray? {
       val charToRead = this
       return withTimeout(OPERATION_TIMEOUT_MS) {

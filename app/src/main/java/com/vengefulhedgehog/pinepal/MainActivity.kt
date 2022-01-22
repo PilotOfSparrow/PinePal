@@ -588,12 +588,18 @@ class MainActivity : ComponentActivity() {
 
         dfuProgress.emit(DfuProgress.Start)
 
-        unzipFirmware(firmwareUri)
+        val firmwareFolder = unzipFirmware(firmwareUri)
 
-        startDfu(connectedDevice.value!!)
+        uploadFirmware(
+          connection = connectedDevice.value!!,
+          firmwareFolder = firmwareFolder,
+        )
+
+        firmwareFolder.deleteRecursively()
+
+        dfuProgress.emit(null)
 
         (application as App).connectedDevice.emit(null)
-
         foundDevices.emit(emptySet())
         firmwareVersion.emit(null)
         postDfuReconnectionRequested.emit(true)
@@ -616,8 +622,8 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  private suspend fun unzipFirmware(firmwareUri: Uri) {
-    withContext(Dispatchers.IO) {
+  private suspend fun unzipFirmware(firmwareUri: Uri): File {
+    return withContext(Dispatchers.IO) {
       val tmpDir = File(cacheDir, FIRMWARE_TMP_FOLDER_NAME)
         .also(File::deleteRecursively) // To make sure we don't have leftovers
 
@@ -630,17 +636,20 @@ class MainActivity : ComponentActivity() {
           zipStream.unzipAll(tmpDir)
         }
       }
+
+      tmpDir
     }
   }
 
-  private suspend fun startDfu(connection: BluetoothConnection) {
+  private suspend fun uploadFirmware(
+    connection: BluetoothConnection,
+    firmwareFolder: File,
+  ) {
+    require(firmwareFolder.isDirectory)
+
     withContext(Dispatchers.Default) {
       connection.perform {
-        val tmpFirmwareFolder = cacheDir.listFiles()
-          .orEmpty()
-          .first { it.name == FIRMWARE_TMP_FOLDER_NAME }
-
-        val firmwareFiles = tmpFirmwareFolder.listFiles()!!
+        val firmwareFiles = firmwareFolder.listFiles()!!
 
         val fileDat = firmwareFiles.first { ".dat" in it.name }
         val fileBin = firmwareFiles.first { ".bin" in it.name }
@@ -654,10 +663,7 @@ class MainActivity : ComponentActivity() {
         checkNotNull(packetCharacteristic)
         checkNotNull(controlPointCharacteristic)
 
-        enableNotificationsFor(
-          characteristic = controlPointCharacteristic,
-          notificationsDescriptorUuid = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb"),
-        )
+        controlPointCharacteristic.enableNotifications()
 
         dfuProgress.emit(DfuProgress.Step1)
 
@@ -757,10 +763,6 @@ class MainActivity : ComponentActivity() {
         }
 
         dfuProgress.emit(DfuProgress.Finalization)
-
-        tmpFirmwareFolder.deleteRecursively()
-
-        dfuProgress.emit(null)
       }
     }
   }
@@ -870,24 +872,6 @@ class MainActivity : ComponentActivity() {
   private val Context.notificationsListeners: Set<String>
     get() = NotificationManagerCompat.getEnabledListenerPackages(this.applicationContext)
 
-  // For real media control you need
-  // a Notification Service
-  // and then something like this
-//    val m = getSystemService(MediaSessionManager::class.java)!!
-//    val component = ComponentName(this, NotiService::class.java)
-//    val sessions = m.getActiveSessions(component)
-//
-//    sessions.forEach {
-//      Log.d("Sessions", "$it -- " + (it?.metadata?.keySet()?.joinToString()))
-//      Log.d("Sessions", "$it -- " + (it?.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)))
-//    }
-//
-//    getSystemService(AudioManager::class.java)
-//      ?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-//
-//    getSystemService(AudioManager::class.java)
-//      ?.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-
   companion object {
     private const val KEY_SHARED_PREF = "pine_pal_shared_prefs"
     private const val KEY_CONNECTED_DEVICE_MAC = "connected_device_mac"
@@ -896,5 +880,4 @@ class MainActivity : ComponentActivity() {
 
     private const val DFU_SEGMENT_SIZE = 20
   }
-
 }
