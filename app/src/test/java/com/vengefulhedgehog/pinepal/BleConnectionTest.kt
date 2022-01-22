@@ -1,34 +1,31 @@
 package com.vengefulhedgehog.pinepal
 
-import android.os.ParcelUuid
-import androidx.test.core.app.ApplicationProvider
-import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
 import io.kotest.core.spec.style.FunSpec
-import io.kotest.extensions.robolectric.RobolectricTest
-import io.kotest.matchers.shouldNotBe
-import org.robolectric.Shadows
-import org.robolectric.shadows.ShadowBluetoothDevice
-import java.util.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.TestCoroutineDispatcher
+import kotlinx.coroutines.test.TestCoroutineScope
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 
-@RobolectricTest
-class BleConnectionTest : FunSpec() {
+class WatchActionsTest : FunSpec({
 
-  init {
-    coroutineDebugProbes = true
+  lateinit var testDispatcher: TestCoroutineDispatcher
+  lateinit var testCoroutineScope: TestCoroutineScope
 
-    test("findCharacteristic") {
-      val robolectricBleDevice = ShadowBluetoothDevice.newInstance("00:11:22:33:AA:BB")
-      val bleConnection = BluetoothConnection(
-        context = ApplicationProvider.getApplicationContext(),
-        device = robolectricBleDevice,
-      )
+  beforeEach {
+    testDispatcher = TestCoroutineDispatcher()
+    testCoroutineScope = TestCoroutineScope(testDispatcher)
 
-      Shadows.shadowOf(robolectricBleDevice)
-        .setUuids(arrayOf(ParcelUuid.fromString("00001531-1212-efde-1523-785feabcd123")))
-
-      bleConnection.findCharacteristic(
-        UUID.fromString("00001531-1212-efde-1523-785feabcd123")
-      ) shouldNotBe null
-    }
+    Dispatchers.setMain(testDispatcher)
   }
-}
+
+  afterEach {
+    Dispatchers.resetMain()
+    testCoroutineScope.cleanupTestCoroutines()
+    testDispatcher.cleanupTestCoroutines()
+  }
+
+  test("DFU: Success") {
+
+  }
+})
