@@ -20,6 +20,7 @@ import androidx.lifecycle.viewModelScope
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
 import com.vengefulhedgehog.pinepal.bluetooth.connect
 import com.vengefulhedgehog.pinepal.domain.bluetooth.DfuProgress
+import com.vengefulhedgehog.pinepal.domain.controllers.ConnectionController
 import com.vengefulhedgehog.pinepal.extensions.unzipAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -69,7 +70,7 @@ class MainActivityViewModel : ViewModel() {
   val windowFlagRemoved = _windowFlagRemoved.asSharedFlow()
 
   private val connectedDevice: StateFlow<BluetoothConnection?>
-    get() = (applicationContext as App).connectedDevice.asStateFlow()
+    get() = ConnectionController.connectedDevice
 
   private val foundDevices = MutableStateFlow(emptySet<BluetoothDevice>())
   private val discoveryProgress = MutableStateFlow(false)
@@ -154,7 +155,7 @@ class MainActivityViewModel : ViewModel() {
         delay(10_000L) // Otherwise device disconnects after 2 sec for some reason
       }
 
-      (applicationContext as App).onDeviceConnected(device.connect(applicationContext))
+      ConnectionController.onDeviceConnected(device.connect(applicationContext))
     }
   }
 
@@ -185,7 +186,7 @@ class MainActivityViewModel : ViewModel() {
 
         dfuProgress.emit(null)
 
-        (applicationContext as App).connectedDevice.emit(null)
+        ConnectionController.onDisconnected()
         foundDevices.emit(emptySet())
         firmwareVersion.emit(null)
         postDfuReconnectionRequested.emit(true)

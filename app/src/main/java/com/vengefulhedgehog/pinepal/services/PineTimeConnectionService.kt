@@ -3,6 +3,7 @@ package com.vengefulhedgehog.pinepal.services
 import android.app.Notification
 import android.app.Service
 import android.bluetooth.BluetoothGattCharacteristic
+import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.os.IBinder
@@ -13,11 +14,13 @@ import androidx.core.app.NotificationManagerCompat
 import com.vengefulhedgehog.pinepal.App
 import com.vengefulhedgehog.pinepal.bluetooth.BleConnectionState
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
+import com.vengefulhedgehog.pinepal.domain.controllers.ConnectionController
 import com.vengefulhedgehog.pinepal.domain.media.ActiveMediaInfo
 import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.nio.ByteBuffer
+import java.time.Instant
 import java.util.*
 
 class PineTimeConnectionService : Service() {
@@ -99,7 +102,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun observeConnectedDevice() {
-    (application as App).connectedDevice
+    ConnectionController.connectedDevice
       .filterNotNull()
       .onEach { connection ->
         subscribeToSteps(connection)
@@ -115,7 +118,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun sendMediaInfo(activeMediaInfo: ActiveMediaInfo?) {
-    val connection = (application as App).connectedDevice.value ?: return
+    val connection = ConnectionController.connectedDevice.value ?: return
 
     connection.performInScope {
       val statusChar = findCharacteristic(UUID_MEDIA_STATUS)
@@ -177,6 +180,8 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun subscribeToHeartRate(connection: BluetoothConnection) {
+    logToFileHeartRate(connection.device.address)
+
     connection.performInScope {
       findCharacteristic(UUID_HEART_RATE)
         ?.let { hrChar ->
@@ -196,6 +201,22 @@ class PineTimeConnectionService : Service() {
         }
         ?.onEach(heartRateFlow::emit)
         ?.launchIn(connectionScope)
+    }
+  }
+
+  private fun logToFileHeartRate(deviceMac: String) {
+    connectionScope.launch(Dispatchers.IO) {
+      val hrOutput = applicationContext.openFileOutput("HR:$deviceMac", Context.MODE_APPEND)
+
+      heartRateFlow
+        .filter { it > 0 }
+        .conflate()
+        .onEach { heartRate ->
+          hrOutput.write("${Instant.now()};$heartRate\n".toByteArray())
+        }
+        .onCompletion { hrOutput.close() }
+        .catch { hrOutput.close() }
+        .launchIn(connectionScope)
     }
   }
 

@@ -38,6 +38,7 @@ class PinePalNotificationListener : NotificationListenerService() {
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
+    if (sbn.id == 37) return
     if (!sbn.isOngoing) return
     if (sbn.notification.extras.get("android.mediaSession") != null) return
 
