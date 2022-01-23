@@ -221,6 +221,8 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun subscribeToSteps(connection: BluetoothConnection) {
+    logToFileSteps(connection.device.address)
+
     connection.performInScope {
       findCharacteristic(UUID_MOTION)
         ?.let { motionChar ->
@@ -238,6 +240,22 @@ class PineTimeConnectionService : Service() {
         }
         ?.onEach(stepsFlow::emit)
         ?.launchIn(connectionScope)
+    }
+  }
+
+  private fun logToFileSteps(deviceMac: String) {
+    connectionScope.launch(Dispatchers.IO) {
+      val hrOutput = applicationContext.openFileOutput("Steps:$deviceMac", Context.MODE_APPEND)
+
+      stepsFlow
+        .filter { it > 0 }
+        .conflate()
+        .onEach { steps ->
+          hrOutput.write("${Instant.now()};$steps\n".toByteArray())
+        }
+        .onCompletion { hrOutput.close() }
+        .catch { hrOutput.close() }
+        .launchIn(connectionScope)
     }
   }
 
