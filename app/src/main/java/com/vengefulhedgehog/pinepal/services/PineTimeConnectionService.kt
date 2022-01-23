@@ -48,13 +48,17 @@ class PineTimeConnectionService : Service() {
   private var notificationCharacteristic: BluetoothGattCharacteristic? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    ensureChannelExists()
+    ensureNotificationChannelExists()
 
     startForeground(ID_NOTIFICATION, notificationBuilder.build())
 
     observeConnectedDevice()
 
     upkeepPhoneNotificationContent()
+
+    activeMediaInfo
+      .onEach(this::sendMediaInfo)
+      .launchIn(connectionScope)
 
     return super.onStartCommand(intent, flags, startId)
   }
@@ -100,38 +104,9 @@ class PineTimeConnectionService : Service() {
       .onEach { connection ->
         subscribeToSteps(connection)
         subscribeToHeartRate(connection)
+        subscribeToMediaEvents(connection)
         subscribeToBatteryLevel(connection)
         subscribeToConnectionState(connection)
-
-        activeMediaInfo
-          .onEach(this::sendMediaInfo)
-          .launchIn(connectionScope)
-
-        connection.performInScope {
-          findCharacteristic(UUID_MEDIA_EVENTS)?.let { mediaChar ->
-            mediaChar.enableNotifications()
-            mediaChar
-              .observeNotifications()
-              .map { eventData -> eventData.firstOrNull()?.toMediaEvent() }
-              .filterNotNull()
-              .onEach { mediaEvent ->
-                when (mediaEvent) {
-                  MediaEvent.APP_OPEN -> {
-                    activeMediaInfo.value?.let { activeMediaInfo ->
-                      sendMediaInfo(activeMediaInfo)
-                    }
-                  }
-                  MediaEvent.PLAY -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-                  MediaEvent.PAUSE -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
-                  MediaEvent.NEXT -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_NEXT)
-                  MediaEvent.PREVIOUS -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
-                  MediaEvent.VOLUME_UP -> audioManager.volumeUp()
-                  MediaEvent.VOLUME_DOWN -> audioManager.volumeDown()
-                }
-              }
-              .launchIn(connectionScope)
-          }
-        }
       }
       .combine(observeNotifications()) { connection, notification ->
         notify(connection, notification)
@@ -190,7 +165,7 @@ class PineTimeConnectionService : Service() {
     (application as App).notification
       .debounce(2_000L)
 
-  private fun ensureChannelExists() {
+  private fun ensureNotificationChannelExists() {
     notificationManager.getNotificationChannel(ID_CONNECTION_CHANNEL) ?: let {
       notificationManager.createNotificationChannel(
         NotificationChannelCompat
@@ -242,6 +217,34 @@ class PineTimeConnectionService : Service() {
         }
         ?.onEach(stepsFlow::emit)
         ?.launchIn(connectionScope)
+    }
+  }
+
+  private fun subscribeToMediaEvents(connection: BluetoothConnection) {
+    connection.performInScope {
+      findCharacteristic(UUID_MEDIA_EVENTS)?.let { mediaChar ->
+        mediaChar.enableNotifications()
+        mediaChar
+          .observeNotifications()
+          .map { eventData -> eventData.firstOrNull()?.toMediaEvent() }
+          .filterNotNull()
+          .onEach { mediaEvent ->
+            when (mediaEvent) {
+              MediaEvent.APP_OPEN -> {
+                activeMediaInfo.value?.let { activeMediaInfo ->
+                  sendMediaInfo(activeMediaInfo)
+                }
+              }
+              MediaEvent.PLAY -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+              MediaEvent.PAUSE -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+              MediaEvent.NEXT -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_NEXT)
+              MediaEvent.PREVIOUS -> audioManager.sendKeyEvent(KeyEvent.KEYCODE_MEDIA_PREVIOUS)
+              MediaEvent.VOLUME_UP -> audioManager.volumeUp()
+              MediaEvent.VOLUME_DOWN -> audioManager.volumeDown()
+            }
+          }
+          .launchIn(connectionScope)
+      }
     }
   }
 
