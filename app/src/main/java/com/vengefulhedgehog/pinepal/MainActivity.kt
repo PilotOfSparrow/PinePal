@@ -309,10 +309,10 @@ class MainActivity : ComponentActivity() {
           items(discoveryInfo.devices, key = { it.address }) { device ->
             Column(
               modifier = Modifier
+                .clickable { viewModel.onDeviceSelected(device) }
                 .fillMaxWidth()
                 .background(Purple500)
                 .padding(20.dp)
-                .clickable { viewModel.onDeviceSelected(device) }
             ) {
               Text(
                 text = device.name,
