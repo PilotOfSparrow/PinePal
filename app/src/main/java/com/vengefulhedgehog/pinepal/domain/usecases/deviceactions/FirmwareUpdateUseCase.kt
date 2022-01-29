@@ -33,7 +33,7 @@ class FirmwareUpdateUseCase @Inject constructor(
     _dfuProgress.emit(DfuProgress.Start)
 
     val firmwareFolder = unzipFirmware(firmwareUri)
-    val activeConnection = activeConnectionUseCase.connectedDevice.value
+    val activeConnection = activeConnectionUseCase.getConnectedDevice()
       ?: throw IllegalStateException("Can't start DFU without connected device")
 
     uploadFirmware(

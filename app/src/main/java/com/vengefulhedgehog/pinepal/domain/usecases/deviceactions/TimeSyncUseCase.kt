@@ -16,7 +16,7 @@ class TimeSyncUseCase @Inject constructor(
 ) {
   suspend fun sync() {
     withContext(Dispatchers.Default) {
-      val connection = activeConnectionUseCase.connectedDevice.value
+      val connection = activeConnectionUseCase.getConnectedDevice()
         ?: throw IllegalStateException("Can't sync time without active connection")
 
       connection.perform {

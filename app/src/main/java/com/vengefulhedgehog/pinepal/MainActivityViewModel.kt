@@ -85,6 +85,10 @@ class MainActivityViewModel @Inject constructor(
     }
   }
 
+  fun onDeviceDisconnectionRequested() {
+    activeConnectionUseCase.disconnect()
+  }
+
   fun onTimeSyncRequested() {
     viewModelScope.launch {
       timeSyncUseCase.sync()
@@ -124,7 +128,7 @@ class MainActivityViewModel @Inject constructor(
           .first { it.find { it.address == connectedDeviceAddress } != null }
           .first { it.address == connectedDeviceAddress }
 
-        delay(5_000L) // Otherwise device disconnects after 2 sec for some reason
+        delay(2_000L) // Otherwise device disconnects after 2 sec for some reason
 
         onDeviceSelected(device)
 

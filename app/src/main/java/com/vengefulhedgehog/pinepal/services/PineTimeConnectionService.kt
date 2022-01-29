@@ -124,7 +124,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun sendMediaInfo(activeMediaInfo: ActiveMediaInfo?) {
-    val connection = activeConnectionUseCase.connectedDevice.value ?: return
+    val connection = activeConnectionUseCase.getConnectedDevice() ?: return
 
     connection.performInScope {
       val statusChar = findCharacteristic(UUID_MEDIA_STATUS)

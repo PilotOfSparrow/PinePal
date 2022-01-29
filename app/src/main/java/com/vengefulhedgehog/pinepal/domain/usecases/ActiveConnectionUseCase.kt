@@ -5,25 +5,34 @@ import android.content.Context
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
 import com.vengefulhedgehog.pinepal.bluetooth.connect
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ActiveConnectionUseCase @Inject constructor(
+  private val previouslyConnectedDeviceUseCase: PreviouslyConnectedDeviceUseCase,
   @ApplicationContext private val context: Context,
 ) {
-  private val _connectedDevice = MutableStateFlow<BluetoothConnection?>(null)
-  val connectedDevice = _connectedDevice.asStateFlow()
+  private val _connectedDevice = MutableSharedFlow<BluetoothConnection?>(
+    replay = 1,
+    onBufferOverflow = BufferOverflow.DROP_OLDEST,
+  )
+  val connectedDevice = _connectedDevice.asSharedFlow()
 
   fun connect(device: BluetoothDevice) {
     _connectedDevice.tryEmit(device.connect(context))
   }
 
   fun disconnect() {
-    connectedDevice.value?.disconnect()
+    previouslyConnectedDeviceUseCase.mac = null
+
+    getConnectedDevice()?.disconnect()
 
     _connectedDevice.tryEmit(null)
   }
+
+  fun getConnectedDevice(): BluetoothConnection? = connectedDevice.replayCache.lastOrNull()
 }

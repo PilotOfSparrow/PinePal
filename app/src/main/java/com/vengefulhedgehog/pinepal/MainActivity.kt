@@ -57,7 +57,6 @@ class MainActivity : ComponentActivity() {
   private val firmwareSelectionLauncher = registerForActivityResult(
     ActivityResultContracts.OpenDocument()
   ) { fileUri ->
-    // check ends with .zip
     viewModel.onFirmwareSelected(fileUri)
   }
 
@@ -151,14 +150,27 @@ class MainActivity : ComponentActivity() {
         .fillMaxWidth()
         .fillMaxHeight()
     ) {
-      Text(
-        text = deviceInfo.name,
-        modifier = Modifier.padding(top = 12.dp)
-      )
-      Text(
-        text = deviceInfo.address,
-        modifier = Modifier.padding(top = 8.dp)
-      )
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 12.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+      ) {
+        Column {
+          Text(
+            text = deviceInfo.name,
+          )
+          Text(
+            text = deviceInfo.address,
+            modifier = Modifier.padding(top = 4.dp)
+          )
+        }
+        if (deviceInfo.dfuProgress == null) {
+          Button(onClick = viewModel::onDeviceDisconnectionRequested) {
+            Text(text = "Disconnect")
+          }
+        }
+      }
       if (deviceInfo.dfuProgress == null) {
         Text(
           text = "Firmware version ${deviceInfo.firmwareVersion}",

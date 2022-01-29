@@ -7,6 +7,7 @@ import com.vengefulhedgehog.pinepal.domain.usecases.ActiveConnectionUseCase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import java.util.*
@@ -32,6 +33,7 @@ class FirmwareVersionUseCase @Inject constructor(
           _firmwareVersion.emit(null)
         }
       }
+      .launchIn(scope)
   }
 
   private fun fetchFirmwareVersion(connection: BluetoothConnection) {
