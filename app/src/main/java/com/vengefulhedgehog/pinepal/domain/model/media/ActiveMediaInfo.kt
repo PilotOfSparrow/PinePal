@@ -1,4 +1,4 @@
-package com.vengefulhedgehog.pinepal.domain.media
+package com.vengefulhedgehog.pinepal.domain.model.media
 
 data class ActiveMediaInfo(
   val title: String?,

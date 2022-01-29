@@ -14,16 +14,22 @@ import androidx.core.app.NotificationManagerCompat
 import com.vengefulhedgehog.pinepal.App
 import com.vengefulhedgehog.pinepal.bluetooth.BleConnectionState
 import com.vengefulhedgehog.pinepal.bluetooth.BluetoothConnection
-import com.vengefulhedgehog.pinepal.domain.controllers.ConnectionController
-import com.vengefulhedgehog.pinepal.domain.media.ActiveMediaInfo
-import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
+import com.vengefulhedgehog.pinepal.domain.model.media.ActiveMediaInfo
+import com.vengefulhedgehog.pinepal.domain.model.notification.PineTimeNotification
+import com.vengefulhedgehog.pinepal.domain.usecases.ActiveConnectionUseCase
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.nio.ByteBuffer
 import java.time.Instant
 import java.util.*
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PineTimeConnectionService : Service() {
+
+  @Inject
+  lateinit var activeConnectionUseCase: ActiveConnectionUseCase
 
   private val connectionScope = CoroutineScope(Dispatchers.Default + Job())
 
@@ -102,7 +108,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun observeConnectedDevice() {
-    ConnectionController.connectedDevice
+    activeConnectionUseCase.connectedDevice
       .filterNotNull()
       .onEach { connection ->
         subscribeToSteps(connection)
@@ -118,7 +124,7 @@ class PineTimeConnectionService : Service() {
   }
 
   private fun sendMediaInfo(activeMediaInfo: ActiveMediaInfo?) {
-    val connection = ConnectionController.connectedDevice.value ?: return
+    val connection = activeConnectionUseCase.connectedDevice.value ?: return
 
     connection.performInScope {
       val statusChar = findCharacteristic(UUID_MEDIA_STATUS)

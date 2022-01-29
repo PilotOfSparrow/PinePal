@@ -1,4 +1,4 @@
-package com.vengefulhedgehog.pinepal.domain.bluetooth
+package com.vengefulhedgehog.pinepal.domain.model.bluetooth
 
 sealed class DfuProgress(val description: String) {
   object Start : DfuProgress("Starting DFU")

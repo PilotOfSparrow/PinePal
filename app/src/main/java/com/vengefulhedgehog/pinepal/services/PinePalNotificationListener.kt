@@ -8,8 +8,8 @@ import android.media.session.PlaybackState
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.vengefulhedgehog.pinepal.App
-import com.vengefulhedgehog.pinepal.domain.media.ActiveMediaInfo
-import com.vengefulhedgehog.pinepal.domain.notification.PineTimeNotification
+import com.vengefulhedgehog.pinepal.domain.model.media.ActiveMediaInfo
+import com.vengefulhedgehog.pinepal.domain.model.notification.PineTimeNotification
 
 class PinePalNotificationListener : NotificationListenerService() {
 

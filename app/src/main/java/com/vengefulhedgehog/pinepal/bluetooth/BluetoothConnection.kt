@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.withLock
 import java.util.*
 
 class BluetoothConnection(
-  context: Context,
+  context: Context, // TODO get rid of this shit
   val device: BluetoothDevice,
 ) {
 
@@ -55,6 +55,8 @@ class BluetoothConnection(
   }
 
   fun disconnect() {
+    _state.tryEmit(BleConnectionState.DISCONNECTED)
+
     gatt.disconnect()
 
     scope.cancel()

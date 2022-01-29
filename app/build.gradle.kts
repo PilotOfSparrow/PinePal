@@ -1,6 +1,10 @@
 plugins {
   id("com.android.application")
+
   id("kotlin-android")
+  kotlin("kapt")
+
+  id("dagger.hilt.android.plugin")
 }
 
 android {
@@ -37,6 +41,9 @@ android {
   composeOptions {
     kotlinCompilerExtensionVersion = "1.0.5"
   }
+  kapt {
+    correctErrorTypes = true
+  }
   packagingOptions {
     resources {
       excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -60,6 +67,10 @@ dependencies {
   implementation("androidx.activity:activity-compose:1.4.0")
   implementation("androidx.constraintlayout:constraintlayout-compose:1.0.0")
 
+  val hilt = "2.39.1"
+  implementation("com.google.dagger:hilt-android:$hilt")
+  kapt("com.google.dagger:hilt-android-compiler:$hilt")
+
   debugImplementation("androidx.compose.ui:ui-tooling:1.0.5")
 
   val kotest = "5.0.2"
@@ -72,4 +83,5 @@ dependencies {
   val mockk = "1.12.1"
   testImplementation("io.mockk:mockk:$mockk")
   testImplementation("io.mockk:mockk-agent-jvm:$mockk")
+
 }

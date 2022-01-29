@@ -3,11 +3,7 @@ package com.vengefulhedgehog.pinepal
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
-import android.location.LocationManager
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
@@ -34,26 +30,29 @@ import androidx.compose.ui.unit.sp
 import androidx.constraintlayout.compose.ConstraintLayout
 import androidx.constraintlayout.compose.Dimension
 import androidx.lifecycle.lifecycleScope
-import com.vengefulhedgehog.pinepal.domain.bluetooth.DfuProgress
+import com.vengefulhedgehog.pinepal.domain.model.bluetooth.DfuProgress
 import com.vengefulhedgehog.pinepal.ui.theme.BackgroundDark
 import com.vengefulhedgehog.pinepal.ui.theme.PinePalTheme
 import com.vengefulhedgehog.pinepal.ui.theme.Purple500
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import com.vengefulhedgehog.pinepal.MainActivityViewModel as ViewModel
 
+@AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
-  private val viewModel by viewModels<MainActivityViewModel>()
+  private val viewModel by viewModels<ViewModel>()
 
   private val resultLauncher = registerForActivityResult(
     ActivityResultContracts.RequestMultiplePermissions()
   ) {
-    viewModel.requestAction(MainActivityScreenAction.CHECK_PERMISSIONS_AND_SERVICES)
+    viewModel.onPermissionCheckRequested()
   }
   private val activityResultLauncher = registerForActivityResult(
     ActivityResultContracts.StartActivityForResult(),
   ) {
-    viewModel.requestAction(MainActivityScreenAction.CHECK_PERMISSIONS_AND_SERVICES)
+    viewModel.onPermissionCheckRequested()
   }
   private val firmwareSelectionLauncher = registerForActivityResult(
     ActivityResultContracts.OpenDocument()
@@ -62,16 +61,8 @@ class MainActivity : ComponentActivity() {
     viewModel.onFirmwareSelected(fileUri)
   }
 
-  private val locationBroadcastReceiver = object : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent?) {
-      viewModel.requestAction(MainActivityScreenAction.CHECK_PERMISSIONS_AND_SERVICES)
-    }
-  }
-
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-
-    viewModel._applicationContext = application
 
     viewModel
       .firmwareSelectionRequest
@@ -118,25 +109,10 @@ class MainActivity : ComponentActivity() {
     }
   }
 
-  override fun onStart() {
-    super.onStart()
-
-    registerReceiver(
-      locationBroadcastReceiver,
-      IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION)
-    )
-  }
-
   override fun onResume() {
     super.onResume()
 
-    viewModel.requestAction(MainActivityScreenAction.CHECK_PERMISSIONS_AND_SERVICES)
-  }
-
-  override fun onStop() {
-    unregisterReceiver(locationBroadcastReceiver)
-
-    super.onStop()
+    viewModel.onPermissionCheckRequested()
   }
 
   @Composable
@@ -207,7 +183,7 @@ class MainActivity : ComponentActivity() {
           }
         }
         Button(
-          onClick = { viewModel.requestAction(MainActivityScreenAction.SYNC_TIME) },
+          onClick = { viewModel.onTimeSyncRequested() },
           modifier = Modifier
             .fillMaxWidth()
             .padding(top = 20.dp)
@@ -215,7 +191,7 @@ class MainActivity : ComponentActivity() {
           Text(text = "Sync time")
         }
         Button(
-          onClick = { viewModel.requestAction(MainActivityScreenAction.START_DFU) },
+          onClick = { viewModel.onDfuRequested() },
           modifier = Modifier
             .fillMaxWidth()
             .align(Alignment.CenterHorizontally)
@@ -296,13 +272,14 @@ class MainActivity : ComponentActivity() {
               top.linkTo(parent.top)
               end.linkTo(parent.end, margin = 16.dp)
               bottom.linkTo(parent.bottom)
-            })
+            }
+          )
         } else {
           Image(
             painter = painterResource(id = android.R.drawable.stat_notify_sync),
             contentDescription = "",
             modifier = Modifier
-              .clickable { viewModel.requestAction(MainActivityScreenAction.START_BLE_SCAN) }
+              .clickable { viewModel.onDeviceScanRequested() }
               .constrainAs(buttonRefresh) {
                 top.linkTo(parent.top)
                 end.linkTo(parent.end, margin = 16.dp)
@@ -323,7 +300,7 @@ class MainActivity : ComponentActivity() {
                 .fillMaxWidth()
                 .background(Purple500)
                 .padding(20.dp)
-                .clickable { viewModel.connectDevice(device) }
+                .clickable { viewModel.onDeviceSelected(device) }
             ) {
               Text(
                 text = device.name,
@@ -378,13 +355,6 @@ class MainActivity : ComponentActivity() {
     }
 
     else -> throw IllegalStateException("No discovery button action available for $this")
-  }
-
-  enum class MainActivityScreenAction {
-    SYNC_TIME,
-    START_DFU,
-    START_BLE_SCAN,
-    CHECK_PERMISSIONS_AND_SERVICES,
   }
 
   sealed interface ViewState {
