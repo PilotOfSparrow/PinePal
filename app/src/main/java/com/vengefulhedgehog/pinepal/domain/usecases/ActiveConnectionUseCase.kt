@@ -22,6 +22,10 @@ class ActiveConnectionUseCase @Inject constructor(
   )
   val connectedDevice = _connectedDevice.asSharedFlow()
 
+  init {
+    _connectedDevice.tryEmit(null)
+  }
+
   fun connect(device: BluetoothDevice) {
     _connectedDevice.tryEmit(device.connect(context))
   }

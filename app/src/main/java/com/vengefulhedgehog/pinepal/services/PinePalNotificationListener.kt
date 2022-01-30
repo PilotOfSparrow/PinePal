@@ -9,17 +9,24 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.vengefulhedgehog.pinepal.App
 import com.vengefulhedgehog.pinepal.domain.model.media.ActiveMediaInfo
-import com.vengefulhedgehog.pinepal.domain.model.notification.PineTimeNotification
+import com.vengefulhedgehog.pinepal.domain.usecases.NotificationsUseCase
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class PinePalNotificationListener : NotificationListenerService() {
 
-  private val mediaSessionManager: MediaSessionManager
-    get() = applicationContext.getSystemService(MediaSessionManager::class.java)
+  @Inject
+  lateinit var notificationsUseCase: NotificationsUseCase
+
+  private val mediaSessionManager: MediaSessionManager by lazy {
+    applicationContext.getSystemService(MediaSessionManager::class.java)
+  }
 
   private var activeMediaController: MediaController? = null
 
-  private val mediaSessionListener =
-    MediaSessionManager.OnActiveSessionsChangedListener { mediaSessions ->
+  private val mediaSessionListener = MediaSessionManager
+    .OnActiveSessionsChangedListener { mediaSessions ->
       onActiveMediaSessionsChanged(mediaSessions.orEmpty())
     }
 
@@ -38,21 +45,18 @@ class PinePalNotificationListener : NotificationListenerService() {
   }
 
   override fun onNotificationPosted(sbn: StatusBarNotification) {
+    notificationsUseCase.registerNotification(sbn)
+
     if (sbn.id == 37) return
-    if (!sbn.isOngoing) return
+    if (sbn.isOngoing) return
     if (sbn.notification.extras.get("android.mediaSession") != null) return
 
-    val title = sbn.notification.extras.getString("android.title")
-    val body = sbn.notification.extras.getString("android.text")
-
-    if (title != null && body != null) {
-      (application as App).notification.tryEmit(
-        PineTimeNotification(
-          title = title,
-          body = body,
-        )
-      )
-    }
+//      (application as App).notification.tryEmit(
+//        PineTimeNotification(
+//          title = title,
+//          body = body,
+//        )
+//      )
   }
 
   override fun onNotificationRemoved(sbn: StatusBarNotification) = Unit
