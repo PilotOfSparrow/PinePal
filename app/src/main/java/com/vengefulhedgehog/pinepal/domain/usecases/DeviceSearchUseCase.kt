@@ -12,12 +12,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class DeviceScanningUseCase @Inject constructor(
+class DeviceSearchUseCase @Inject constructor(
   @ApplicationContext private val context: Context,
 ) {
 
-  private val _discoveryInProgress = MutableStateFlow(false)
-  val discoveryInProgress = _discoveryInProgress.asStateFlow()
+  private val _searchInProgress = MutableStateFlow(false)
+  val searchInProgress = _searchInProgress.asStateFlow()
 
   private val _foundDevices = MutableStateFlow(emptySet<BluetoothDevice>())
   val foundDevices = _foundDevices.asStateFlow()
@@ -29,24 +29,24 @@ class DeviceScanningUseCase @Inject constructor(
   }
 
   fun start() {
-    if (_discoveryInProgress.value) return
+    if (_searchInProgress.value) return
 
     context.getSystemService(BluetoothManager::class.java)
       ?.adapter
       ?.bluetoothLeScanner
       ?.startScan(bleScanCallback)
-      ?.let { _discoveryInProgress.tryEmit(true) }
+      ?.let { _searchInProgress.tryEmit(true) }
   }
 
   fun stop() {
-    if (!_discoveryInProgress.value) return
+    if (!_searchInProgress.value) return
 
     context.getSystemService(BluetoothManager::class.java)
       ?.adapter
       ?.bluetoothLeScanner
       ?.stopScan(bleScanCallback)
 
-    _discoveryInProgress.tryEmit(false)
+    _searchInProgress.tryEmit(false)
   }
 
   fun clearFindings() {

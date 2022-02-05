@@ -5,10 +5,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.location.LocationManager
-import androidx.core.content.ContextCompat
 import androidx.core.location.LocationManagerCompat
+import com.vengefulhedgehog.pinepal.extensions.permissionGranted
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,8 +19,11 @@ class LocationUseCase @Inject constructor(
   @ApplicationContext private val context: Context,
 ) {
 
-  private val _locationAvailable = MutableStateFlow(false)
-  val locationAvailable = _locationAvailable.asStateFlow()
+  private val _locationServiceActive = MutableStateFlow(false)
+  val locationServiceActive = _locationServiceActive.asStateFlow()
+
+  private val _locationPermissionGranted = MutableStateFlow(false)
+  val locationPermissionGranted = _locationPermissionGranted.asStateFlow()
 
   private val locationManager by lazy {
     context.getSystemService(LocationManager::class.java)
@@ -41,14 +43,11 @@ class LocationUseCase @Inject constructor(
   }
 
   fun checkAvailability() {
-    _locationAvailable.tryEmit(
+    _locationServiceActive.tryEmit(
       LocationManagerCompat.isLocationEnabled(locationManager)
     )
+    _locationPermissionGranted.tryEmit(
+      context.permissionGranted(Manifest.permission.ACCESS_FINE_LOCATION)
+    )
   }
-
-  fun isLocationPermissionGranted(): Boolean =
-    ContextCompat.checkSelfPermission(
-      context,
-      Manifest.permission.ACCESS_FINE_LOCATION
-    ) == PackageManager.PERMISSION_GRANTED
 }

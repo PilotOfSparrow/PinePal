@@ -18,7 +18,7 @@ class BluetoothUseCase @Inject constructor(
 ) {
 
   private val _bluetoothAvailable = MutableStateFlow(false)
-  val bluetoothAvailable = _bluetoothAvailable.asStateFlow()
+  val bluetoothServiceActive = _bluetoothAvailable.asStateFlow()
 
   private val bluetoothManager by lazy {
     context.getSystemService(BluetoothManager::class.java)

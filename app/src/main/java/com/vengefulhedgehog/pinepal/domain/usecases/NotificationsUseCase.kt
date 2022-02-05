@@ -27,7 +27,7 @@ class NotificationsUseCase @Inject constructor(
   private val alertNotificationServiceUseCase: AlertNotificationServiceUseCase,
   @ApplicationScope private val appScope: CoroutineScope,
   @ApplicationContext private val context: Context,
-){
+) {
   private val _hasNotificationsAccess = MutableStateFlow(false)
   val hasNotificationsAccess = _hasNotificationsAccess.asStateFlow()
 
@@ -85,15 +85,16 @@ class NotificationsUseCase @Inject constructor(
           "Steps: ${statistics.steps} " +
           "Battery: ${statistics.batteryLevel}%"
 
-      title to text
+      notificationBuilder
+        .setContentTitle(title)
+        .setContentText(text)
+        .build()
     }
       .sample(2_000L)
-      .onEach { (title, text) ->
+      .onEach { notification ->
         notificationManager.notify(
           ID_NOTIFICATION,
-          notificationBuilder
-            .setContentTitle(title)
-            .setContentText(text).build()
+          notification
         )
       }
       .launchIn(appScope)

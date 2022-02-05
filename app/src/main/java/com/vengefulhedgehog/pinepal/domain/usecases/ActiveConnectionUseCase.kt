@@ -27,6 +27,8 @@ class ActiveConnectionUseCase @Inject constructor(
   }
 
   fun connect(device: BluetoothDevice) {
+    previouslyConnectedDeviceUseCase.mac = device.address
+
     _connectedDevice.tryEmit(device.connect(context))
   }
 
