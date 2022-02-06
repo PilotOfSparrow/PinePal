@@ -9,8 +9,8 @@ import com.vengefulhedgehog.pinepal.domain.model.bluetooth.DfuProgress
 import com.vengefulhedgehog.pinepal.domain.usecases.ActiveConnectionUseCase
 import com.vengefulhedgehog.pinepal.extensions.unzipAll
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
@@ -26,24 +26,36 @@ class FirmwareUpdateUseCase @Inject constructor(
   @ApplicationContext private val context: Context,
 ) {
 
-  private val _dfuProgress = MutableStateFlow<DfuProgress?>(null)
-  val dfuProgress = _dfuProgress.asStateFlow()
+  private val _dfuProgress = MutableSharedFlow<DfuProgress?>(
+    replay = 1,
+    extraBufferCapacity = 2,
+  ).also { it.tryEmit(null) }
+  val dfuProgress = _dfuProgress.asSharedFlow()
 
+  @Throws(Exception::class)
   suspend fun start(firmwareUri: Uri) {
-    _dfuProgress.emit(DfuProgress.Start)
+    try {
+      _dfuProgress.emit(DfuProgress.Start)
 
-    val firmwareFolder = unzipFirmware(firmwareUri)
-    val activeConnection = activeConnectionUseCase.getConnectedDevice()
-      ?: throw IllegalStateException("Can't start DFU without connected device")
+      val firmwareFolder = unzipFirmware(firmwareUri)
+      val activeConnection = activeConnectionUseCase.getConnectedDevice()
+        ?: throw IllegalStateException("Can't start DFU without connected device")
 
-    uploadFirmware(
-      connection = activeConnection,
-      firmwareFolder = firmwareFolder,
-    )
+      uploadFirmware(
+        connection = activeConnection,
+        firmwareFolder = firmwareFolder,
+      )
 
-    firmwareFolder.deleteRecursively()
+      _dfuProgress.emit(DfuProgress.Finalization)
 
-    _dfuProgress.emit(null)
+      firmwareFolder.deleteRecursively()
+    } catch (e: Exception) {
+      _dfuProgress.emit(DfuProgress.Error(e))
+
+      throw e
+    } finally {
+      _dfuProgress.emit(null)
+    }
   }
 
   private suspend fun unzipFirmware(firmwareUri: Uri): File = withContext(dispatchers.io) {
@@ -99,7 +111,10 @@ class FirmwareUpdateUseCase @Inject constructor(
           .array()
 
         packetCharacteristic.write(ByteArray(8) + binFileSizeArray)
-        controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x01, 0x01))
+        controlPointCharacteristic.awaitNotification(
+          expectedContent = byteArrayOf(0x10, 0x01, 0x01),
+          timeout = DFU_NOTIFICATION_TIMEOUT_MS
+        )
 
         _dfuProgress.emit(DfuProgress.Step3)
 
@@ -109,7 +124,10 @@ class FirmwareUpdateUseCase @Inject constructor(
 
         packetCharacteristic.write(fileDat.readBytes())
         controlPointCharacteristic.write(byteArrayOf(0x02, 0x01))
-        controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x02, 0x01))
+        controlPointCharacteristic.awaitNotification(
+          expectedContent = byteArrayOf(0x10, 0x02, 0x01),
+          timeout = DFU_NOTIFICATION_TIMEOUT_MS
+        )
 
         _dfuProgress.emit(DfuProgress.Step5)
 
@@ -161,19 +179,28 @@ class FirmwareUpdateUseCase @Inject constructor(
             if (--confirmationCountDown == 0) {
               confirmationCountDown = confirmationNotificationsInterval
 
-              controlPointCharacteristic.awaitNotification(startsWith = 0x11)
+              controlPointCharacteristic.awaitNotification(
+                startsWith = 0x11,
+                timeout = DFU_NOTIFICATION_TIMEOUT_MS
+              )
             }
 
             segmentBytesCount = fileStream.read(firmwareSegment)
           }
         }
 
-        controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x03, 0x01))
+        controlPointCharacteristic.awaitNotification(
+          expectedContent = byteArrayOf(0x10, 0x03, 0x01),
+          timeout = DFU_NOTIFICATION_TIMEOUT_MS
+        )
 
         _dfuProgress.emit(DfuProgress.Step8)
 
         controlPointCharacteristic.write(byteArrayOf(0x04))
-        controlPointCharacteristic.awaitNotification(byteArrayOf(0x10, 0x04, 0x01))
+        controlPointCharacteristic.awaitNotification(
+          byteArrayOf(0x10, 0x04, 0x01),
+          timeout = DFU_NOTIFICATION_TIMEOUT_MS
+        )
 
         _dfuProgress.emit(DfuProgress.Step9)
 
@@ -182,13 +209,12 @@ class FirmwareUpdateUseCase @Inject constructor(
         } catch (e: Exception) {
           Log.e("DFU", "Activation timeout") // Sometimes it's respond
         }
-
-        _dfuProgress.emit(DfuProgress.Finalization)
       }
     }
   }
 
   companion object {
     private const val DFU_SEGMENT_SIZE = 20
+    private const val DFU_NOTIFICATION_TIMEOUT_MS = 10_000L
   }
 }

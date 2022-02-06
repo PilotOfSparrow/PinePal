@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vengefulhedgehog.pinepal.common.CoroutineDispatchers
 import com.vengefulhedgehog.pinepal.domain.handler.SystemEvent
+import com.vengefulhedgehog.pinepal.domain.model.bluetooth.DfuProgress
 import com.vengefulhedgehog.pinepal.domain.usecases.ActiveConnectionUseCase
 import com.vengefulhedgehog.pinepal.domain.usecases.DeviceSearchUseCase
 import com.vengefulhedgehog.pinepal.domain.usecases.NotificationsUseCase
@@ -67,15 +68,28 @@ class ConnectedDeviceViewModel @Inject constructor(
         }
       }
     }
-      .combine(firmwareUpdateUseCase.dfuProgress.sample(300L)) { state, dfuProgress ->
+      .combine(firmwareUpdateUseCase.dfuProgress) { state, dfuProgress ->
         state?.copy(
           dfuProgress = dfuProgress,
         )
       }
-      .debounce(150L)
-      .onEach { _state.emit(it ?: ConnectedDeviceState()) }
+      .onEach { newState ->
+        _state.emit(newState ?: ConnectedDeviceState())
+
+        if (newState?.dfuProgress is DfuProgress.Error) {
+          delay(3_000L)
+        }
+      }
       .flowOn(dispatchers.default)
       .launchIn(viewModelScope)
+  }
+
+  fun onBackPress() {
+    if (state.value.run { dfuProgress != null || reconnection }) {
+      // TODO maybe show something? naahh
+    } else {
+      systemEventsUseCase.send(SystemEvent.Navigation.Back())
+    }
   }
 
   fun onTimeSync() {

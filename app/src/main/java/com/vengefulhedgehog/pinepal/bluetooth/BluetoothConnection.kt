@@ -170,28 +170,45 @@ class BluetoothConnection(
 
     suspend fun BluetoothGattCharacteristic.awaitNotification(
       expectedContent: ByteArray,
+      timeout: Long = -1L,
     ) {
-      bleCallback.observeNotifications(this.uuid)
-        .filter { notificationContent ->
-          notificationContent.contentEquals(expectedContent)
-        }
-        .take(1)
-        .collect()
+      awaitNotification(
+        predicate = { it.contentEquals(expectedContent) },
+        timeout = timeout,
+      )
     }
 
     suspend fun BluetoothGattCharacteristic.awaitNotification(
       startsWith: Byte,
+      timeout: Long = -1L,
     ) {
-      bleCallback.observeNotifications(this.uuid)
-        .filter { it.firstOrNull() == startsWith }
-        .take(1)
-        .collect()
+      awaitNotification(
+        predicate = { it.firstOrNull() == startsWith },
+        timeout = timeout,
+      )
     }
-  }
 
-  companion object {
-    private const val TAG = "BluetoothConnection"
+    suspend fun BluetoothGattCharacteristic.awaitNotification(
+      predicate: (content: ByteArray) -> Boolean,
+      timeout: Long = -1L,
+    ) {
+      val observation = bleCallback.observeNotifications(this.uuid)
+        .filter { predicate.invoke(it) }
+        .take(1)
 
-    private const val OPERATION_TIMEOUT_MS = 5_000L
+      if (timeout > 0) {
+        withTimeout(timeMillis = timeout) {
+          observation.collect()
+        }
+      } else {
+        observation.collect()
+      }
+    }
+
+    companion object {
+      private const val TAG = "BluetoothConnection"
+
+      private const val OPERATION_TIMEOUT_MS = 5_000L
+    }
   }
 }

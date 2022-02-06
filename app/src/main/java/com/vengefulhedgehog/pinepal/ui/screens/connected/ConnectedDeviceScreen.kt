@@ -30,8 +30,7 @@ fun ConnectedDeviceScreen() {
   )
 
   BackHandler(
-    enabled = state.dfuProgress != null || state.reconnection,
-    onBack = viewModel::onDeviceDisconnect
+    onBack = viewModel::onBackPress
   )
 
   Column(
@@ -109,28 +108,40 @@ fun ConnectedDeviceScreen() {
         Text(text = "Start Firmware Update")
       }
     } else {
-      val progress = state.dfuProgress
-      if (progress is DfuProgress.Step7) {
-        Text(
-          text = progress.run { "$sentBytes / $firmwareSizeInBytes" },
-          modifier = Modifier
-            .padding(top = 20.dp)
-            .align(Alignment.CenterHorizontally)
-        )
-        LinearProgressIndicator(
-          progress = progress.run { sentBytes.toFloat() / firmwareSizeInBytes },
-          color = Color.Magenta,
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 20.dp)
-        )
-      } else {
-        Text(
-          text = progress?.description ?: "Attempting to reconnect",
-          modifier = Modifier
-            .padding(top = 20.dp)
-            .align(Alignment.CenterHorizontally)
-        )
+      DfuProgress(progress = state.dfuProgress)
+    }
+  }
+}
+
+@Composable
+private fun DfuProgress(progress: DfuProgress?) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .fillMaxHeight()
+  ) {
+    if (progress is DfuProgress.Step7) {
+      Text(
+        text = progress.run { "$sentBytes / $firmwareSizeInBytes" },
+        modifier = Modifier
+          .padding(top = 20.dp)
+          .align(Alignment.CenterHorizontally)
+      )
+      LinearProgressIndicator(
+        progress = progress.run { sentBytes.toFloat() / firmwareSizeInBytes },
+        color = Color.Magenta,
+        modifier = Modifier
+          .fillMaxWidth()
+          .padding(top = 20.dp)
+      )
+    } else {
+      Text(
+        text = progress?.description ?: "Attempting to reconnect",
+        modifier = Modifier
+          .padding(top = 20.dp)
+          .align(Alignment.CenterHorizontally)
+      )
+      if (progress !is DfuProgress.Error) {
         LinearProgressIndicator(
           color = Color.Magenta,
           modifier = Modifier

@@ -25,4 +25,8 @@ sealed class DfuProgress(val description: String) {
   object Step9 : DfuProgress("Activate new firmware")
 
   object Finalization : DfuProgress("Finalizing DFU")
+
+  data class Error(
+    val error: Throwable?,
+  ) : DfuProgress("Something went wrong")
 }
