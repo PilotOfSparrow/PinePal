@@ -2,7 +2,6 @@ package com.vengefulhedgehog.pinepal.ui.screens.connected
 
 import android.annotation.SuppressLint
 import android.net.Uri
-import android.util.Log
 import android.view.WindowManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -22,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import javax.inject.Inject
 
 @HiltViewModel
@@ -134,9 +134,11 @@ class ConnectedDeviceViewModel @Inject constructor(
 
         deviceSearchUseCase.start()
 
-        val device = deviceSearchUseCase.foundDevices
-          .first { it.find { it.address == connectedDeviceAddress } != null }
-          .first { it.address == connectedDeviceAddress }
+        val device = withTimeout(40_000L) {
+          deviceSearchUseCase.foundDevices
+            .first { it.find { it.address == connectedDeviceAddress } != null }
+            .first { it.address == connectedDeviceAddress }
+        }
 
         delay(2_000L) // Otherwise device disconnects after 2 sec for some reason
 
@@ -146,8 +148,7 @@ class ConnectedDeviceViewModel @Inject constructor(
 
         onTimeSync()
       } catch (e: Exception) {
-        Log.e("Firmware update", "Failed to update firmware", e)
-        // TODO show prompt which would recommend to restart the watch before next attempt
+        postDfuReconnectionRequested.emit(false) // TODO do something better
       } finally {
         systemEventsUseCase.send(
           SystemEvent.WindowFlagRemove(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
