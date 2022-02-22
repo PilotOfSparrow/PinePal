@@ -40,8 +40,9 @@ class BatteryUseCase @Inject constructor(
   private fun subscribe(connection: BluetoothConnection) {
     subscriptionJob = appScope.launch(dispatchers.default) {
       connection.perform {
-        findCharacteristic(UUID_BATTERY_LEVEL)
-          ?.let { batteryLevelChar ->
+        flowOf(findCharacteristic(UUID_BATTERY_LEVEL))
+          .filterNotNull()
+          .flatMapLatest { batteryLevelChar ->
             batteryLevelChar.enableNotifications()
 
             merge(
@@ -49,15 +50,16 @@ class BatteryUseCase @Inject constructor(
               batteryLevelChar.observeNotifications(),
             )
           }
-          ?.map { batteryLevel ->
+          .map { batteryLevel ->
             batteryLevel
               ?.takeIf(ByteArray::isNotEmpty)
               ?.firstOrNull()
               ?.toInt()
               ?: 0
           }
-          ?.onEach(_batteryLevel::emit)
-          ?.launchIn(appScope)
+          .onEach(_batteryLevel::emit)
+          .catch { error -> /*TODO Log, and maybe retry */ }
+          .launchIn(appScope)
       }
     }
   }
